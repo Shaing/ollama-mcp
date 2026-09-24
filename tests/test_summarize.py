@@ -32,3 +32,10 @@ async def test_large_input_map_reduce(app, fake: FakeBackend, tmp_path: Path):
 async def test_nothing_to_summarize(app, fake: FakeBackend):
     out = await summarize(app, paths=["/no/such/file"], text="", question="", timeout_s=10, ctx=None)
     assert out.startswith("error:") and "not a file" in out and fake.calls == []
+
+
+async def test_call_through_mcp_server(server, fake: FakeBackend):
+    fake.replies = ["- db-7 refused connections"]
+    result = await server.call_tool("summarize", {"text": "ERROR db-7 connection refused", "question": "errors?"})
+    assert not result.is_error, result.content[0].text
+    assert "db-7 refused connections" in result.content[0].text

@@ -16,7 +16,8 @@ from .backend import Backend, OllamaBackend
 from .config import Settings
 from .outputs import OutputStore
 from .routing import profile_models
-from .tools import delegate, review, search, status, summarize
+from .tools import delegate, review, search, status
+from .tools import summarize as summarize_tool  # the tool function below is also named summarize
 from .warmup import warmup
 
 READ_ONLY = ToolAnnotations(read_only_hint=True, open_world_hint=False)
@@ -149,7 +150,7 @@ def build_server(settings: Settings, backend: Backend | None = None) -> MCPServe
 
         NOT for short files (<200 lines): just Read them.
         """
-        return await summarize.summarize(
+        return await summarize_tool.summarize(
             app, paths=paths, text=text, question=question, timeout_s=timeout_s, ctx=ctx
         )
 
