@@ -4,7 +4,13 @@
 set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")/.." && pwd)"
-PROFILE="${OLLAMA_AGENT_PROFILE:-trio}"
+# Pin a profile only when asked (OLLAMA_AGENT_PROFILE=big scripts/register.sh). A pinned --env
+# value overrides the shell, so leaving it out keeps `OLLAMA_AGENT_PROFILE=big claude` working;
+# the server defaults to trio.
+ENV_ARGS=()
+if [[ -n ${OLLAMA_AGENT_PROFILE:-} ]]; then
+  ENV_ARGS=(--env "OLLAMA_AGENT_PROFILE=$OLLAMA_AGENT_PROFILE")
+fi
 
 uv tool install --editable "$HERE" --force
 # Not `command -v`: an activated repo .venv would shadow the uv tool install.
@@ -13,11 +19,14 @@ BIN="$(uv tool dir --bin)/ollama-agent"
 
 claude mcp remove --scope user ollama-agent >/dev/null 2>&1 || true
 claude mcp add --scope user --transport stdio ollama-agent \
-  --env "OLLAMA_AGENT_PROFILE=$PROFILE" \
-  -- "$BIN"
+  "${ENV_ARGS[@]}" -- "$BIN"
 
 echo
 claude mcp list
 echo
 echo "Done. Start a new Claude Code session; tools appear as mcp__ollama-agent__<tool>."
-echo "Switch profile per session with: OLLAMA_AGENT_PROFILE=big claude"
+if [[ ${#ENV_ARGS[@]} -eq 0 ]]; then
+  echo "Switch profile per session with: OLLAMA_AGENT_PROFILE=big claude"
+else
+  echo "Profile pinned to $OLLAMA_AGENT_PROFILE; re-run without OLLAMA_AGENT_PROFILE to allow per-session switching."
+fi
