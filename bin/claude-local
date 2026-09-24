@@ -39,6 +39,9 @@ export ANTHROPIC_SMALL_FAST_MODEL="$MODEL"
 export ANTHROPIC_DEFAULT_HAIKU_MODEL="$MODEL"
 export ANTHROPIC_DEFAULT_SONNET_MODEL="$MODEL"
 export ANTHROPIC_DEFAULT_OPUS_MODEL="$MODEL"
+# Claude Code doesn't know local models and would assume a 200K window; without this it never
+# auto-compacts before Ollama silently truncates the prompt at num_ctx.
+export CLAUDE_CODE_MAX_CONTEXT_TOKENS="$NUM_CTX"
 export DISABLE_NON_ESSENTIAL_MODEL_CALLS=1
 export CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1
 
