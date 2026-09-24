@@ -1,82 +1,69 @@
 # ollama-agent — 進度回報
 
-- 回報時間：2026-09-23 17:20 (CST)
+- 回報時間：2026-09-24 10:55 (CST)（前次：2026-09-23 17:20）
 - 專案：`~/work/ollama`（ollama-agent，Python MCP server，把本機 Ollama 模型變成 Claude Code 的工具）
 - 主機：<host>，RTX 4080 16 GB，62 GB RAM，Ollama 0.34.3
-- 回報人：<email>（由 Claude 依程式碼、測試結果與系統狀態整理；專案尚無 commit，時間依檔案 mtime 推估）
+- 回報人：<email>（由 Claude 依程式碼、測試結果與系統狀態整理）
 
 ## 一、一句話結論
 
-六個 MCP 工具全部實作完成，單元測試與真實 Ollama 整合測試全數通過；剩下的是「接線」工作：git 初次 commit、在 Claude Code 核准 `.mcp.json`、user-scope 註冊、建立離線用的 `qwen3.6-cc` 模型。
+昨天的待辦 1–7 全部完成：已 commit、兩個 scope 都可用、離線模型已建立、Ollama 調校生效、六個工具都有真實 Ollama 整合測試。另修正 `register.sh` 兩個會讓 user-scope 註冊行為錯誤的問題。
 
-## 二、完成項目
+## 二、今天完成
 
-### 核心程式（`src/ollama_agent`，含測試共 2,506 行）
-
-| 模組 | 內容 | 狀態 |
+| # | 項目 | 結果 |
 |---|---|---|
-| `server.py` | `MCPServer` 接線、六個工具的 docstring（Claude 讀的工具說明，含 NOT for 提示）、lifespan 背景 warmup | ✅ |
-| `tools/delegate.py` | `delegate_task`：自足子任務交給本機模型，支援 context_files、strong/fast tier、think | ✅ |
-| `tools/review.py` | `review_diff`：結構化 code review（Pydantic 輸出、`git diff` 自動取 diff、重試、raw fallback、verdict 與 findings 一致性校正） | ✅ |
-| `tools/summarize.py` | `summarize`：map-reduce 摘要（fast 做 map、strong 做 reduce），可帶 question | ✅ |
-| `tools/search.py` + `index/` | `index_codebase` / `search_code`：SQLite 向量索引、增量更新（mtime/hash）、語意搜尋 | ✅ |
-| `tools/status.py` | `local_models_status`：profile、tier→model、`ollama ps` GPU/CPU 分布、外來模型警告 | ✅ |
-| `routing.py` | `trio` / `big` 兩個 profile，每個 process 固定；`big` 絕不同時載入第二個 LLM；warmup 由大到小 | ✅ |
-| `config.py` | 環境變數 + 自寫 `.env` loader，`--check` 模式 | ✅ |
-| `backend.py` | Ollama AsyncClient 薄封裝，Protocol 介面供測試替換 FakeBackend | ✅ |
-| `generate.py` / `outputs.py` / `files.py` / `chunking.py` | 串流生成含 timeout 回傳部分結果、完整輸出落地 `.ollama-agent/outputs/*.md` 並裁切回傳、檔案讀取預算、行切塊 | ✅ |
+| 1 | git 初次 commit | `0505543`，44 檔 |
+| 2 | 核准 `.mcp.json` | `claude mcp list` 為 ✔ Connected；`local_models_status` 正常回報 trio |
+| 3 | user-scope 註冊 | `uv tool` 安裝 ollama-agent 0.1.0，註冊指向 `~/.local/bin/ollama-agent`；repo 外 ✔ Connected |
+| 4 | 離線模型 | `ollama create qwen3.6-cc`，`num_ctx 65536`，共用原模型權重不佔額外磁碟 |
+| 5 | Ollama 調校 | override.conf 加入 `OLLAMA_FLASH_ATTENTION=1`、`OLLAMA_KV_CACHE_TYPE=q8_0`，已重啟生效（原檔備份於 `override.conf.bak.*`） |
+| 6 | 整合測試補強 | 新增 `summarize`（單次、map-reduce）與 `index_codebase` + `search_code` 真實案例，`d83b272` |
+| 7 | VRAM 競爭 | 調校後 trio 佔 11.1 GiB（前次 12.0），餘裕變大；切 `big` 前仍需卸載 trio |
 
-### 周邊
+### 修正（今天發現）
 
-- `bin/claude-local`：Claude Code 走 Ollama `/v1/messages` 的離線啟動器，所有 model slot 指向同一模型 ✅
-- `Modelfile.qwen3.6-cc`：35B 模型 64K context 的副本定義 ✅（模型本身尚未 `ollama create`，見待辦）
-- `.claude/agents/local-reviewer.md`：先用本機 review_diff、再逐條驗證的子代理 ✅
-- `scripts/register.sh`（uv tool 安裝 + user-scope `claude mcp add`）、`scripts/bench.py`（VRAM 配置 + tok/s 量測）✅
-- `.mcp.json`（repo 範圍註冊）、`.env.example`、`.gitignore`、`README.md`、`CLAUDE.md` ✅
+| Commit | 問題 | 修正 |
+|---|---|---|
+| `6d3744e` | `register.sh` 用 `command -v`，VS Code 啟用 `.venv` 時 user scope 會指到 repo 內的 `.venv/bin` | 改用 `uv tool dir --bin` |
+| `6d3744e` | `sudo setup_todo.sh` 因 sudo 重設 PATH 而報「缺少指令: uv claude」 | 以 root 執行時直接提示改用一般使用者（需 sudo 的指令腳本自己會呼叫） |
+| `f0974e6` | `register.sh` 以 `--env OLLAMA_AGENT_PROFILE=trio` 固定 profile；實測 MCP 設定的 env 會蓋過 shell，`OLLAMA_AGENT_PROFILE=big claude` 在其他 repo 無效 | 預設不寫 env（server 預設 trio），只有執行 `register.sh` 時明確設定才固定 |
 
-### 環境準備
-
-- Ollama 0.17.6 → 0.34.3 升級並重啟（15:00），systemd override `OLLAMA_HOST=0.0.0.0` ✅
-- 模型下載：qwen3.5:4b、qwen3-embedding:0.6b、qwen3.6:35b-a3b（既有 qwen3.5:latest 9B）✅
-- 實測數據（`scripts/bench.py`）：
-
-| Profile | 模型 | 速度 | 記憶體配置 |
-|---|---|---|---|
-| `trio`（預設） | qwen3.5:latest 9B + qwen3.5:4b + qwen3-embedding:0.6b | 72 / 97 tok/s | 三個全駐留 GPU（約 15.0 GB），前提是 9B 先載入 |
-| `big` | qwen3.6:35b-a3b（strong 與 fast 同一模型） | 36–38 tok/s | 12 GiB GPU + 9 GiB RAM，embedding 強制 CPU |
-
-## 三、驗證結果（17:15 實跑）
+## 三、驗證結果（10:30–10:55 實跑）
 
 | 項目 | 結果 |
 |---|---|
-| `uv run pytest`（fake backend） | **34 passed, 4 skipped**，1.35 s（skipped 為整合測試） |
-| `OLLAMA_AGENT_INTEGRATION=1 uv run pytest tests/integration -s` | **4 passed**，6.88 s |
-| ├ `test_status` | 回報 trio profile、Ollama 0.34.3、三模型駐留 11.5 GiB GPU |
-| ├ `test_delegate_fast` | qwen3.5:4b 回 PONG，0.1 s |
-| ├ `test_embed` | qwen3-embedding 回 1024 維向量 |
-| └ `test_review_small_diff` | qwen3.5:latest 抓到 ZeroDivisionError（critical），verdict request_changes，6.47 s |
-| `uv run ollama-agent --check` | 正常；trio 三模型駐留，total on GPU 11.5 GiB |
-| 手動 MCP smoke | `.ollama-agent/outputs/` 有兩筆 16:55–16:56 的 `delegate_task` READY 回應 |
-| `claude mcp list` | `ollama-agent` 顯示 **Pending approval** |
+| `uv run pytest` | **34 passed, 7 skipped**，1.40 s |
+| `OLLAMA_AGENT_INTEGRATION=1 uv run pytest tests/integration` | **7 passed**，23.9 s |
+| ├ `test_summarize_single_pass` | qwen3.5:latest 找出埋入的 `db-7` ERROR，3.8 s |
+| ├ `test_summarize_map_reduce` | 55 KB log，4B map + 9B reduce，30K tokens 輸入，`db-7` 保留到最終摘要，14.3 s |
+| └ `test_index_and_search` | 4 檔語意搜尋第一名正確（score 0.80 / 0.62，次高 ≤ 0.25）；重新索引 `unchanged=4` |
+| profile 切換（stdio `initialize`） | 未設變數為 `trio`，`OLLAMA_AGENT_PROFILE=big` 為 `big` |
 
-## 四、尚未完成／待辦（建議順序）
+### 調校前後（`scripts/bench.py trio moe big64k`）
 
-> 第 1–5 項與驗證已整理成 `scripts/setup_todo.sh`，在設備上執行即可（`--list` 看步驟，可只跑指定步驟，已完成的會自動略過；`tune` 步驟需要 sudo 密碼）。
+| 項目 | 9/23（調校前） | 9/24（flash-attn + q8 KV） |
+|---|---|---|
+| trio embedding 在 GPU 比例 | 70–73% | **100%** |
+| trio 三模型合計 | 12.0 GiB | **11.2 GiB** |
+| trio 生成速度（9B / 4B） | 72 / 97 tok/s | 71 / 95 tok/s |
+| big 32K 生成速度 | 36–38 tok/s | **39.5 tok/s**（GPU 12.2 GiB） |
+| big 64K（`qwen3.6-cc` 等效） | 未測 | 38.9 tok/s，GPU 11.9 GiB，總量僅比 32K 多 0.1 GiB |
+| big 冷載入 | 15–20 s | 14–24 s |
 
-1. **git 初次 commit**：目前 `master` 零 commit，全部檔案 untracked（`*.tgz`、`.ollama-agent/`、`.env` 已在 .gitignore）。
-2. **核准 `.mcp.json`**：在 `~/work/ollama` 執行 `claude`，同意 ollama-agent server，確認出現 `mcp__ollama-agent__*` 六個工具並呼叫 `local_models_status`。
-3. **user-scope 註冊**（選用）：`scripts/register.sh`。目前 `uv tool list` 無 ollama-agent，其他 repo 還用不到這些工具。
-4. **建立離線模型**：`ollama create qwen3.6-cc -f Modelfile.qwen3.6-cc`，否則 `bin/claude-local` 預設 MODEL 會報 not found。
-5. **Ollama 調校**（需 sudo）：flash-attention、q8 KV cache 已評估建議但尚未套用。
-6. **整合測試補強**：`summarize`、`index_codebase`、`search_code` 目前只有 fake backend 單元測試，建議加真實 Ollama 案例。
-7. **VRAM 競爭**：GPU 現為 15.1 / 16.4 GB，trio 三模型已接近滿載。切到 `big` profile 前需先卸載 trio；`local_models_status` 會對外來模型提出警告。
+## 四、剩餘待辦
 
-## 五、環境快照（17:20）
+1. **`bin/claude-local` 煙霧測試**（選用）：`ollama stop` 卸載 trio 後執行 `bin/claude-local -p "hi"`；會載入 35B，約 20 s。
+2. 現有 Claude Code session 若在 `register.sh` 修正前已啟動，重開才會套用新的 user-scope 設定。
+
+## 五、環境快照（10:55）
 
 | 項目 | 值 |
 |---|---|
-| Ollama | 0.34.3，`*:11434`，`OLLAMA_HOST=0.0.0.0` |
-| 已下載模型 | qwen3.6:35b-a3b 22 GB、qwen3.5:latest 6.6 GB、qwen3.5:4b 3.4 GB、qwen3-embedding:0.6b 639 MB（模型目錄共 31 GB） |
-| 駐留中 | qwen3.5:latest（GPU）、qwen3.5:4b（GPU）、qwen3-embedding:0.6b（73% GPU） |
-| GPU | 15.1 / 16.4 GB |
-| 磁碟 `/` | 439 GB，已用 75%，剩 108 GB |
+| Ollama | 0.34.3，`*:11434`；`OLLAMA_HOST=0.0.0.0`、`OLLAMA_FLASH_ATTENTION=1`、`OLLAMA_KV_CACHE_TYPE=q8_0` |
+| 已下載模型 | qwen3.6:35b-a3b 22 GB（+ `qwen3.6-cc` 副本）、qwen3.5:latest 6.6 GB、qwen3.5:4b 3.4 GB、qwen3-embedding:0.6b 639 MB |
+| 駐留中 | qwen3.5:latest、qwen3.5:4b、qwen3-embedding:0.6b，全部 100% GPU（合計 11.1 GiB） |
+| GPU | 14.9 / 16.4 GB |
+| 磁碟 `/` | 439 GB，已用 75%，剩 107 GB |
+| git | `master`，4 個 commit（`0505543` → `f0974e6`） |
+| 程式碼 | `src` + `tests` 共 2,563 行 |
