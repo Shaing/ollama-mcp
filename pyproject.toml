@@ -2,6 +2,8 @@
 name = "ollama-agent"
 version = "0.1.0"
 description = "MCP server exposing local Ollama models to Claude Code as tools"
+license = "MIT"
+license-files = ["LICENSE"]
 requires-python = ">=3.12"
 dependencies = [
     "mcp>=2.2,<3",
