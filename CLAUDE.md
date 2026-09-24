@@ -24,3 +24,12 @@ engineer. If a tool is slow or fails, `local_models_status` shows what is loaded
   (switching between the 35B model and the 9B/4B pair costs a 15–20 s reload on a 16 GB GPU).
 - Tool descriptions are the docstrings in `src/ollama_agent/server.py`; they are what Claude
   reads to decide when to call a tool, so keep the "NOT for" lines.
+
+## Service management
+
+Registered with `~/work/ops/svc` as `ollama-agent` (`KIND=mcp`, see `~/work/ops/services.d/ollama-agent.conf`)
+and depends on `ollama` (system unit). It is spawned per Claude Code session, so there is nothing to
+start or stop: `svc status ollama-agent` lists the running copies and the session that owns each,
+`svc check ollama-agent` runs `--check`, `svc logs ollama-agent` tails the newest MCP log.
+If this project ever grows a long-running part (e.g. a shared HTTP MCP server), register it as its
+own service per `~/work/ops/README.md`.
