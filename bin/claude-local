@@ -1,0 +1,52 @@
+#!/usr/bin/env bash
+# Run Claude Code fully against local Ollama (offline / cloud-outage fallback).
+#
+# Uses Ollama's Anthropic-compatible /v1/messages endpoint. One model serves Claude Code
+# itself AND the ollama-agent MCP tools (profile "big" with the same model name and
+# context size), so only a single LLM is ever loaded on the GPU.
+#
+#   bin/claude-local                # interactive
+#   bin/claude-local -p "..."       # one-shot
+#   MODEL=qwen3.5:latest bin/claude-local   # smaller/faster model
+set -euo pipefail
+
+HOST="${OLLAMA_URL:-http://127.0.0.1:11434}"
+MODEL="${MODEL:-qwen3.6-cc}"
+NUM_CTX="${NUM_CTX:-65536}"
+HERE="$(cd "$(dirname "$0")/.." && pwd)"
+
+if ! curl -fsS -m 3 "$HOST/api/version" >/dev/null 2>&1; then
+  echo "claude-local: Ollama is not reachable at $HOST" >&2
+  exit 1
+fi
+if ! ollama show "$MODEL" >/dev/null 2>&1; then
+  cat >&2 <<EOF
+claude-local: model '$MODEL' is not available. Create it (once) with:
+    ollama create qwen3.6-cc -f $HERE/Modelfile.qwen3.6-cc
+or pick an existing one:  MODEL=qwen3.5:latest $0
+EOF
+  exit 1
+fi
+
+# --- Claude Code -> Ollama -------------------------------------------------
+export ANTHROPIC_BASE_URL="$HOST"
+export ANTHROPIC_AUTH_TOKEN="ollama"   # required by the client, ignored by Ollama
+export ANTHROPIC_API_KEY=""
+export ANTHROPIC_MODEL="$MODEL"
+# Every "other" model slot points at the same model so nothing else gets loaded.
+export CLAUDE_CODE_SUBAGENT_MODEL="$MODEL"
+export ANTHROPIC_SMALL_FAST_MODEL="$MODEL"
+export ANTHROPIC_DEFAULT_HAIKU_MODEL="$MODEL"
+export ANTHROPIC_DEFAULT_SONNET_MODEL="$MODEL"
+export ANTHROPIC_DEFAULT_OPUS_MODEL="$MODEL"
+export DISABLE_NON_ESSENTIAL_MODEL_CALLS=1
+export CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1
+
+# --- ollama-agent MCP tools share that one model ----------------------------
+export OLLAMA_AGENT_PROFILE=big
+export OLLAMA_AGENT_STRONG_MODEL="$MODEL"
+export OLLAMA_AGENT_FAST_MODEL="$MODEL"
+export OLLAMA_AGENT_NUM_CTX="$NUM_CTX"   # must match the Modelfile or Ollama reloads
+
+echo "claude-local: $MODEL @ $HOST (num_ctx $NUM_CTX), MCP profile big" >&2
+exec claude --model "$MODEL" "$@"
