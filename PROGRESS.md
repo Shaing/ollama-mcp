@@ -1,6 +1,6 @@
 # ollama-agent — 進度回報
 
-- 回報時間：2026-09-24 11:30 (CST)（前次：2026-09-24 10:55）
+- 回報時間：2026-09-24 16:05 (CST)（前次：2026-09-24 11:30）
 - 專案：`~/work/ollama`（ollama-agent，Python MCP server，把本機 Ollama 模型變成 Claude Code 的工具）
 - 主機：本機（RTX 4080 16 GB，62 GB RAM，Ollama 0.34.3）
 - 回報人：專案維護者（由 Claude 依程式碼、測試結果與系統狀態整理）
@@ -80,3 +80,30 @@
 | 磁碟 `/` | 439 GB，已用 75%，剩 107 GB |
 | git | `master`，9 個 commit（`8d3f8e7` → `aeb8dd6`，另有本報告） |
 | 程式碼 | `src` + `tests` 共 2,573 行 |
+
+## 六、形式化驗證（16:05 追加）
+
+把 README、工具 docstring、`.env.example`、CLAUDE.md 裡的承諾抽成 60 餘條可檢驗的性質，寫進 `formal/SPEC.md`，分四層驗證；`formal/run.sh` 一次跑完，任何一層與 SPEC 不一致就以非 0 結束。
+
+| 層 | 位置 | 結果 |
+|---|---|---|
+| SMT 證明（Z3） | `formal/smt/verify.py` | 22 條：**15 條對所有輸入成立**，7 條反例（全部是預期中的已知偏差，見下） |
+| 模型檢查（TLA+/TLC） | `formal/tla/OllamaAgent.tla` + 5 個 cfg | trio 14,174 / big 8,367 / conc1 734 / nowarmup 5,750 個狀態全數通過 9 條不變式 + 2 條 liveness；`trio_foreign` 依設計違反 `NoReload`（外部模型會造成重載，證明 `local_models_status` 的警告有必要） |
+| 符號執行（CrossHair） | `formal/crosshair/contracts.py` | 真實 `clip` 四條後置條件在界限內 Confirmed over all paths；`estimate_tokens`、`chunk_lines` 時限內無反例（未窮盡） |
+| 性質測試 + 靜態檢查（Hypothesis / AST） | `tests/test_properties.py`、`tests/test_spec_static.py` | 16 passed、3 xfail（釘住已知偏差）；含 SQLite 索引的 model-based 狀態機測試、「每個 Ollama 呼叫都在 semaphore 內」等 AST 檢查 |
+
+全套 `uv run pytest`：52 passed、7 skipped、3 xfailed。新增相依：`hypothesis`（dev）、`z3-solver`、`crosshair-tool`（`formal` group）；TLC 需 Java 11+，jar 首次執行自動下載到 `~/.cache/tla2tools/`。
+
+### 發現（程式與規格不一致，皆未修，待決定）
+
+| # | 位置 | 問題 | 嚴重度 |
+|---|---|---|---|
+| F1 | `tools/summarize.py` | 門檻常數假設 32K context，不看 `settings.num_ctx`；`OLLAMA_AGENT_NUM_CTX=8192` 時 45K 字元的單次摘要會被 Ollama 靜默截斷（最低安全值 15,038） | 中 |
+| F6 | `chunking.chunk_lines` | 行很長時（summarize ≥1,333 字元/行、索引 ≥375）視窗每次只前進一行，map 輸入最多放大 8 倍、embedding 3 倍，且會產生完全包含在前一塊裡的重複 chunk；預設設定即可觸發 | 中 |
+| F2 | `tools/review.py` | 「further cut to fit」差一個 token（Z3 已證明改成 −401 即可） | 低 |
+| F7 | `warmup.py` | `MAX_CONCURRENCY=1` 時第一個工具呼叫要等整個 warmup（big 約 20 s），文件未提 | 低（文件） |
+| F4 | `delegate_task` docstring | 「~90k chars」只在 `max_tokens ≤ 6,383` 成立 | 低（文件） |
+| F3 / F5 / F8 / F9 | review / chunking / config / routing | 邊角設定：review 的 `num_ctx < 4497`、chunk 負 overlap、`MAX_TIMEOUT_S < 5`、big profile 被 override 打破單 LLM 而 status 不警告 | 低 |
+
+細節、反例與建議修法見 `formal/SPEC.md` 末段。
+

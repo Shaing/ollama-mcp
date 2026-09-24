@@ -24,6 +24,10 @@ engineer. If a tool is slow or fails, `local_models_status` shows what is loaded
   (switching between the 35B model and the 9B/4B pair costs a 15–20 s reload on a 16 GB GPU).
 - Tool descriptions are the docstrings in `src/ollama_agent/server.py`; they are what Claude
   reads to decide when to call a tool, so keep the "NOT for" lines.
+- `formal/SPEC.md` is the formal specification: every documented property with how it is
+  verified (Z3 proofs, TLC model checking, CrossHair, Hypothesis, AST checks) and its status.
+  `formal/run.sh` runs all of it. Known violations are pinned as expected counterexamples /
+  strict xfails: when you fix one, flip its expectation and update the SPEC.md row.
 
 ## Service management
 

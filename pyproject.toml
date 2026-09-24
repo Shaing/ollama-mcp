@@ -16,7 +16,9 @@ dependencies = [
 ollama-agent = "ollama_agent.__main__:main"
 
 [dependency-groups]
-dev = ["pytest>=8", "pytest-asyncio>=0.24"]
+dev = ["pytest>=8", "pytest-asyncio>=0.24", "hypothesis>=6.100"]
+# Formal verification harness (see formal/README.md): SMT proofs and symbolic execution.
+formal = ["z3-solver>=4.13", "crosshair-tool>=0.0.70"]
 
 [build-system]
 requires = ["hatchling"]
