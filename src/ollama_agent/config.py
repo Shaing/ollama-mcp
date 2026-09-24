@@ -6,7 +6,6 @@ dotenv dependency, existing environment variables win over the file.
 
 from __future__ import annotations
 
-import hashlib
 import os
 import re
 from dataclasses import dataclass
@@ -61,12 +60,10 @@ class ConfigError(Exception):
     pass
 
 
-def default_data_dir(cwd: Path) -> Path:
-    """<cwd>/.ollama-agent when cwd is writable, else a per-cwd dir under ~."""
-    if os.access(cwd, os.W_OK):
-        return cwd / ".ollama-agent"
-    digest = hashlib.sha1(str(cwd).encode()).hexdigest()[:12]
-    return Path.home() / ".ollama-agent" / digest
+def default_data_dir() -> Path:
+    """$XDG_CACHE_HOME/ollama-agent (~/.cache/ollama-agent): never inside the user's repos."""
+    cache = os.environ.get("XDG_CACHE_HOME") or str(Path.home() / ".cache")
+    return Path(cache) / "ollama-agent"
 
 
 @dataclass(frozen=True)
@@ -95,7 +92,7 @@ class Settings:
                 f"OLLAMA_AGENT_PROFILE must be one of {', '.join(PROFILE_NAMES)}, got {profile!r}"
             )
         data_dir_raw = _env("OLLAMA_AGENT_DATA_DIR")
-        data_dir = Path(data_dir_raw).expanduser() if data_dir_raw else default_data_dir(cwd)
+        data_dir = Path(data_dir_raw).expanduser() if data_dir_raw else default_data_dir()
         return cls(
             ollama_host=_env("OLLAMA_HOST") or "http://127.0.0.1:11434",
             profile=profile,  # type: ignore[arg-type]

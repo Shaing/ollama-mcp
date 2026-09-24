@@ -163,8 +163,8 @@ def build_server(settings: Settings, backend: Backend | None = None) -> MCPServe
     ) -> str:
         """Build or refresh the LOCAL semantic search index for a directory tree.
 
-        Incremental: only files whose mtime/hash changed are re-embedded. Stored at
-        `<root>/.ollama-agent/index.sqlite`. Run once per repo; `search_code` refreshes it
+        Incremental: only files whose mtime/hash changed are re-embedded. Stored in the
+        server's data dir (~/.cache/ollama-agent), not in the repo. Run once per repo; `search_code` refreshes it
         automatically afterwards. `include_globs` defaults to common source/doc extensions.
         """
         return await search.index_codebase(

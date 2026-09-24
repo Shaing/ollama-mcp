@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import hashlib
 import logging
-import os
 import time
 from pathlib import Path
 from typing import Any
@@ -25,8 +24,6 @@ SNIPPET_LINES = 25
 
 
 def index_path_for(app: App, root: Path) -> Path:
-    if os.access(root, os.W_OK):
-        return root / ".ollama-agent" / "index.sqlite"
     digest = hashlib.sha1(str(root).encode()).hexdigest()[:12]
     return app.settings.data_dir / f"index-{digest}.sqlite"
 

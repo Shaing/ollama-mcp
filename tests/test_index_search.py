@@ -52,6 +52,13 @@ async def test_index_is_incremental(app, fake: FakeBackend, tmp_path: Path):
     assert "removed=1" in out and "total: 1 files" in out
 
 
+async def test_index_lives_in_data_dir_not_repo(app, fake: FakeBackend, tmp_path: Path):
+    root = _repo(tmp_path)
+    out = await index_codebase(app, root=str(root), include_globs=None, force=False, ctx=None)
+    assert not (root / ".ollama-agent").exists()
+    assert f"index: {app.settings.data_dir}" in out
+
+
 async def test_search_ranks_semantically_similar_chunk(app, fake: FakeBackend, tmp_path: Path):
     root = _repo(tmp_path)
     out = await search_code(app, query="retry failed upload", root=str(root), top_k=2, refresh=True, ctx=None)

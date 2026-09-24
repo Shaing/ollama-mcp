@@ -15,7 +15,7 @@ against Ollama.
 | `index_codebase` / `search_code` | Local embedding index + semantic search by meaning | qwen3-embedding |
 | `local_models_status` | Profile, tier→model map, `ollama ps` with GPU/CPU split, thrash warnings | – |
 
-Full outputs are always written to `.ollama-agent/outputs/*.md`; Claude gets the head plus the path.
+Full outputs are always written to `~/.cache/ollama-agent/outputs/*.md`; Claude gets the head plus the path.
 
 ## Profiles (16 GB GPU)
 

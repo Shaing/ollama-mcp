@@ -47,10 +47,11 @@ def test_from_env_and_dotenv(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         if k.startswith("OLLAMA_"):
             monkeypatch.delenv(k, raising=False)
     (tmp_path / ".env").write_text("OLLAMA_AGENT_PROFILE=big\nOLLAMA_AGENT_NUM_CTX=16384 # comment\n")
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
     load_dotenv(tmp_path / ".env")
     s = Settings.from_env(cwd=tmp_path)
     assert s.profile == "big" and s.num_ctx == 16384
-    assert s.data_dir == tmp_path / ".ollama-agent"
+    assert s.data_dir == tmp_path / "cache" / "ollama-agent"
 
 
 def test_invalid_profile(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
