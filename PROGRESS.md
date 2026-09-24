@@ -1,13 +1,13 @@
 # ollama-agent — 進度回報
 
-- 回報時間：2026-09-24 10:55 (CST)（前次：2026-09-23 17:20）
+- 回報時間：2026-09-24 11:30 (CST)（前次：2026-09-24 10:55）
 - 專案：`~/work/ollama`（ollama-agent，Python MCP server，把本機 Ollama 模型變成 Claude Code 的工具）
 - 主機：<host>，RTX 4080 16 GB，62 GB RAM，Ollama 0.34.3
 - 回報人：<email>（由 Claude 依程式碼、測試結果與系統狀態整理）
 
 ## 一、一句話結論
 
-昨天的待辦 1–7 全部完成：已 commit、兩個 scope 都可用、離線模型已建立、Ollama 調校生效、六個工具都有真實 Ollama 整合測試。另修正 `register.sh` 兩個會讓 user-scope 註冊行為錯誤的問題。
+昨天的待辦 1–7 全部完成：已 commit、兩個 scope 都可用、離線模型已建立、Ollama 調校生效、六個工具都有真實 Ollama 整合測試。另修正 `register.sh` 兩個會讓 user-scope 註冊行為錯誤的問題。11:30 追加：修好 MCP `summarize` 一律失敗、輸出不再寫進使用者的 repo、`claude-local` 的 context 長度設定；`claude-local` 煙霧測試通過，目前沒有已知問題。
 
 ## 二、今天完成
 
@@ -28,12 +28,15 @@
 | `6d3744e` | `register.sh` 用 `command -v`，VS Code 啟用 `.venv` 時 user scope 會指到 repo 內的 `.venv/bin` | 改用 `uv tool dir --bin` |
 | `6d3744e` | `sudo setup_todo.sh` 因 sudo 重設 PATH 而報「缺少指令: uv claude」 | 以 root 執行時直接提示改用一般使用者（需 sudo 的指令腳本自己會呼叫） |
 | `f0974e6` | `register.sh` 以 `--env OLLAMA_AGENT_PROFILE=trio` 固定 profile；實測 MCP 設定的 env 會蓋過 shell，`OLLAMA_AGENT_PROFILE=big claude` 在其他 repo 無效 | 預設不寫 env（server 預設 trio），只有執行 `register.sh` 時明確設定才固定 |
+| `92af21d` | MCP `summarize` 工具一律失敗（`Error executing tool summarize`，0 s）：`server.py` 內的工具函式名稱 `summarize` 蓋掉同名模組，`summarize.summarize(...)` 變成找函式屬性；單元測試直接呼叫模組所以沒抓到 | 模組改以 `summarize_tool` 匯入；新增經由 MCP server 呼叫的測試 `test_summarize.py::test_call_through_mcp_server`。全部 35 passed / 7 skipped，stdio 實測對真實 Ollama 成功 |
+| `2379986` | 輸出和搜尋索引預設寫在 `<cwd>/.ollama-agent`、`<repo>/.ollama-agent`，user scope 會在每個用過的 repo 留下未追蹤資料夾（這次在 `~/work` 也產生了） | 改為 `$XDG_CACHE_HOME/ollama-agent`（`~/.cache/ollama-agent`），索引以 repo 路徑 hash 分檔；舊資料夾已清除、輸出已搬過去 |
+| `d8c2ce8` | `claude-local` 煙霧測試時 Claude Code 警告不認得 `qwen3.6-cc`，會假設 200K context；實際 64K，超過前不會自動壓縮，Ollama 會直接截斷 | 設 `CLAUDE_CODE_MAX_CONTEXT_TOKENS=$NUM_CTX`，重跑警告消失 |
 
 ## 三、驗證結果（10:30–10:55 實跑）
 
 | 項目 | 結果 |
 |---|---|
-| `uv run pytest` | **34 passed, 7 skipped**，1.40 s |
+| `uv run pytest` | **35 passed, 7 skipped**，1.40 s |
 | `OLLAMA_AGENT_INTEGRATION=1 uv run pytest tests/integration` | **7 passed**，23.9 s |
 | ├ `test_summarize_single_pass` | qwen3.5:latest 找出埋入的 `db-7` ERROR，3.8 s |
 | ├ `test_summarize_map_reduce` | 55 KB log，4B map + 9B reduce，30K tokens 輸入，`db-7` 保留到最終摘要，14.3 s |
@@ -51,12 +54,22 @@
 | big 64K（`qwen3.6-cc` 等效） | 未測 | 38.9 tok/s，GPU 11.9 GiB，總量僅比 32K 多 0.1 GiB |
 | big 冷載入 | 15–20 s | 14–24 s |
 
+### 追加驗證（11:05–11:30）
+
+| 項目 | 結果 |
+|---|---|
+| `uv run pytest` | **36 passed, 7 skipped**（新增索引位置測試） |
+| 整合測試 | **7 passed**，23.2 s（新資料位置下） |
+| 六個 MCP 工具經由 Claude Code 實際呼叫 | 全部成功；`summarize` 5.4 s、`delegate_task`(4B) 1.0 s、`search_code` 0.8 s、`review_diff` 4.1 s |
+| `bin/claude-local -p` | 回覆正確；冷啟動含 35B 載入 58 s，熱啟動 4 s；35B 為 44%/56% CPU/GPU。測完已卸載並重新載入 trio |
+| `ruff check`（`uv run --with ruff`） | 14 個既有風格問題（非本次引入），未處理 |
+
 ## 四、剩餘待辦
 
-1. **`bin/claude-local` 煙霧測試**（選用）：`ollama stop` 卸載 trio 後執行 `bin/claude-local -p "hi"`；會載入 35B，約 20 s。
-2. 現有 Claude Code session 若在 `register.sh` 修正前已啟動，重開才會套用新的 user-scope 設定。
+1. 在 `2379986` 之前啟動的 ollama-agent 仍會寫到舊位置，重開 Claude Code session 後生效。
+2. （選用）14 個 ruff 風格問題；專案目前沒有把 ruff 列入 dev 相依。
 
-## 五、環境快照（10:55）
+## 五、環境快照（11:30）
 
 | 項目 | 值 |
 |---|---|
@@ -65,5 +78,5 @@
 | 駐留中 | qwen3.5:latest、qwen3.5:4b、qwen3-embedding:0.6b，全部 100% GPU（合計 11.1 GiB） |
 | GPU | 14.9 / 16.4 GB |
 | 磁碟 `/` | 439 GB，已用 75%，剩 107 GB |
-| git | `master`，4 個 commit（`0505543` → `f0974e6`） |
-| 程式碼 | `src` + `tests` 共 2,563 行 |
+| git | `master`，9 個 commit（`0505543` → `d8c2ce8`，另有本報告） |
+| 程式碼 | `src` + `tests` 共 2,573 行 |
