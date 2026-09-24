@@ -13,24 +13,24 @@
 
 | # | 項目 | 結果 |
 |---|---|---|
-| 1 | git 初次 commit | `0505543`，44 檔 |
+| 1 | git 初次 commit | `8d3f8e7`，44 檔 |
 | 2 | 核准 `.mcp.json` | `claude mcp list` 為 ✔ Connected；`local_models_status` 正常回報 trio |
 | 3 | user-scope 註冊 | `uv tool` 安裝 ollama-agent 0.1.0，註冊指向 `~/.local/bin/ollama-agent`；repo 外 ✔ Connected |
 | 4 | 離線模型 | `ollama create qwen3.6-cc`，`num_ctx 65536`，共用原模型權重不佔額外磁碟 |
 | 5 | Ollama 調校 | override.conf 加入 `OLLAMA_FLASH_ATTENTION=1`、`OLLAMA_KV_CACHE_TYPE=q8_0`，已重啟生效（原檔備份於 `override.conf.bak.*`） |
-| 6 | 整合測試補強 | 新增 `summarize`（單次、map-reduce）與 `index_codebase` + `search_code` 真實案例，`d83b272` |
+| 6 | 整合測試補強 | 新增 `summarize`（單次、map-reduce）與 `index_codebase` + `search_code` 真實案例，`1746303` |
 | 7 | VRAM 競爭 | 調校後 trio 佔 11.1 GiB（前次 12.0），餘裕變大；切 `big` 前仍需卸載 trio |
 
 ### 修正（今天發現）
 
 | Commit | 問題 | 修正 |
 |---|---|---|
-| `6d3744e` | `register.sh` 用 `command -v`，VS Code 啟用 `.venv` 時 user scope 會指到 repo 內的 `.venv/bin` | 改用 `uv tool dir --bin` |
-| `6d3744e` | `sudo setup_todo.sh` 因 sudo 重設 PATH 而報「缺少指令: uv claude」 | 以 root 執行時直接提示改用一般使用者（需 sudo 的指令腳本自己會呼叫） |
-| `f0974e6` | `register.sh` 以 `--env OLLAMA_AGENT_PROFILE=trio` 固定 profile；實測 MCP 設定的 env 會蓋過 shell，`OLLAMA_AGENT_PROFILE=big claude` 在其他 repo 無效 | 預設不寫 env（server 預設 trio），只有執行 `register.sh` 時明確設定才固定 |
-| `92af21d` | MCP `summarize` 工具一律失敗（`Error executing tool summarize`，0 s）：`server.py` 內的工具函式名稱 `summarize` 蓋掉同名模組，`summarize.summarize(...)` 變成找函式屬性；單元測試直接呼叫模組所以沒抓到 | 模組改以 `summarize_tool` 匯入；新增經由 MCP server 呼叫的測試 `test_summarize.py::test_call_through_mcp_server`。全部 35 passed / 7 skipped，stdio 實測對真實 Ollama 成功 |
-| `2379986` | 輸出和搜尋索引預設寫在 `<cwd>/.ollama-agent`、`<repo>/.ollama-agent`，user scope 會在每個用過的 repo 留下未追蹤資料夾（這次在 `~/work` 也產生了） | 改為 `$XDG_CACHE_HOME/ollama-agent`（`~/.cache/ollama-agent`），索引以 repo 路徑 hash 分檔；舊資料夾已清除、輸出已搬過去 |
-| `d8c2ce8` | `claude-local` 煙霧測試時 Claude Code 警告不認得 `qwen3.6-cc`，會假設 200K context；實際 64K，超過前不會自動壓縮，Ollama 會直接截斷 | 設 `CLAUDE_CODE_MAX_CONTEXT_TOKENS=$NUM_CTX`，重跑警告消失 |
+| `02d4097` | `register.sh` 用 `command -v`，VS Code 啟用 `.venv` 時 user scope 會指到 repo 內的 `.venv/bin` | 改用 `uv tool dir --bin` |
+| `02d4097` | `sudo setup_todo.sh` 因 sudo 重設 PATH 而報「缺少指令: uv claude」 | 以 root 執行時直接提示改用一般使用者（需 sudo 的指令腳本自己會呼叫） |
+| `1825c23` | `register.sh` 以 `--env OLLAMA_AGENT_PROFILE=trio` 固定 profile；實測 MCP 設定的 env 會蓋過 shell，`OLLAMA_AGENT_PROFILE=big claude` 在其他 repo 無效 | 預設不寫 env（server 預設 trio），只有執行 `register.sh` 時明確設定才固定 |
+| `b28d561` | MCP `summarize` 工具一律失敗（`Error executing tool summarize`，0 s）：`server.py` 內的工具函式名稱 `summarize` 蓋掉同名模組，`summarize.summarize(...)` 變成找函式屬性；單元測試直接呼叫模組所以沒抓到 | 模組改以 `summarize_tool` 匯入；新增經由 MCP server 呼叫的測試 `test_summarize.py::test_call_through_mcp_server`。全部 35 passed / 7 skipped，stdio 實測對真實 Ollama 成功 |
+| `971828a` | 輸出和搜尋索引預設寫在 `<cwd>/.ollama-agent`、`<repo>/.ollama-agent`，user scope 會在每個用過的 repo 留下未追蹤資料夾（這次在 `~/work` 也產生了） | 改為 `$XDG_CACHE_HOME/ollama-agent`（`~/.cache/ollama-agent`），索引以 repo 路徑 hash 分檔；舊資料夾已清除、輸出已搬過去 |
+| `aeb8dd6` | `claude-local` 煙霧測試時 Claude Code 警告不認得 `qwen3.6-cc`，會假設 200K context；實際 64K，超過前不會自動壓縮，Ollama 會直接截斷 | 設 `CLAUDE_CODE_MAX_CONTEXT_TOKENS=$NUM_CTX`，重跑警告消失 |
 
 ## 三、驗證結果（10:30–10:55 實跑）
 
@@ -66,7 +66,7 @@
 
 ## 四、剩餘待辦
 
-1. 在 `2379986` 之前啟動的 ollama-agent 仍會寫到舊位置，重開 Claude Code session 後生效。
+1. 在 `971828a` 之前啟動的 ollama-agent 仍會寫到舊位置，重開 Claude Code session 後生效。
 2. （選用）14 個 ruff 風格問題；專案目前沒有把 ruff 列入 dev 相依。
 
 ## 五、環境快照（11:30）
@@ -78,5 +78,5 @@
 | 駐留中 | qwen3.5:latest、qwen3.5:4b、qwen3-embedding:0.6b，全部 100% GPU（合計 11.1 GiB） |
 | GPU | 14.9 / 16.4 GB |
 | 磁碟 `/` | 439 GB，已用 75%，剩 107 GB |
-| git | `master`，9 個 commit（`0505543` → `d8c2ce8`，另有本報告） |
+| git | `master`，9 個 commit（`8d3f8e7` → `aeb8dd6`，另有本報告） |
 | 程式碼 | `src` + `tests` 共 2,573 行 |
