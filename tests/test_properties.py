@@ -1,8 +1,8 @@
 """Property-based checks of formal/SPEC.md against the real code (Hypothesis).
 
-IDs in the test names and comments refer to the properties in formal/SPEC.md.  Tests marked
-`xfail(strict=True)` pin down deviations the formal analysis found: fixing the code makes
-them pass, which fails the suite until the marker (and the SPEC.md row) is removed.
+IDs in the test names and comments refer to the properties in formal/SPEC.md.  A deviation the
+formal analysis finds is pinned here as `xfail(strict=True)` until the code is fixed: the fix
+makes the test pass, which fails the suite until the marker (and the SPEC.md row) is updated.
 """
 
 from __future__ import annotations
@@ -41,6 +41,7 @@ from ollama_agent.routing import (
     warmup_specs,
 )
 from ollama_agent.server import build_app
+from ollama_agent.tools import summarize as summarize_tool
 from ollama_agent.tools.review import (
     MAX_PREDICT,
     Finding,
@@ -74,30 +75,34 @@ def test_chunk_lines_covers_every_line_in_order(lines, max_chars, overlap):
         assert c.text == "\n".join(ref[c.start - 1 : c.end])  # C2: the text is exactly its lines
         assert len(c.text) <= max_chars or c.start == c.end  # C3: size bound; a long line stands alone
     for a, b in pairwise(chunks):
-        assert b.start == max(a.end - overlap + 1, a.start + 1)  # C5: the exact overlap rule
+        # C5: share min(overlap, half the chunk) lines, unless that window would end inside `a`,
+        # in which case `b` starts right after `a`
+        cand = max(a.end - min(overlap, (a.end - a.start + 1) // 2) + 1, a.start + 1)
+        if cand <= a.end:
+            shared = sum(len(ln) + 1 for ln in ref[cand - 1 : a.end])
+            expected = cand if shared + len(ref[a.end]) + 1 <= max_chars else a.end + 1
+        else:
+            expected = cand
+        assert b.start == expected
         assert b.start <= a.end + 1  # C1: no gap between chunks
-        assert b.end >= a.end  # C6: ends never move backwards
+        assert b.end > a.end  # C8: every chunk adds at least one line
+        assert 2 * (b.start - a.start) >= a.end - a.start + 1  # C6: the window advances by >= half a chunk
     assert {ln for c in chunks for ln in range(c.start, c.end + 1)} == set(range(1, n + 1))  # C1
 
 
-@pytest.mark.xfail(strict=True, reason="SPEC C8: a chunk can be a strict sub-window of its predecessor")
 @given(short_lines_st, st.integers(2, 12), st.integers(1, 4))
-def test_chunk_lines_every_chunk_adds_a_line(lines, max_chars, overlap):
-    chunks = chunk_lines("\n".join(lines), max_chars=max_chars, overlap_lines=overlap)
-    for a, b in pairwise(chunks):
-        assert b.end > a.end, f"{b} is contained in {a}"
-
-
-@pytest.mark.xfail(strict=True, reason="SPEC C5: a negative overlap_lines silently skips lines")
-@given(short_lines_st, st.integers(-5, -1))
-def test_chunk_lines_negative_overlap_is_rejected_or_harmless(lines, overlap):
+def test_chunk_lines_output_is_at_most_twice_the_input(lines, max_chars, overlap):
     text = "\n".join(lines)
-    try:
-        chunks = chunk_lines(text, max_chars=1, overlap_lines=overlap)
-    except ValueError:
-        return  # rejecting it is fine too
-    covered = {ln for c in chunks for ln in range(c.start, c.end + 1)}
-    assert covered == set(range(1, len(text.splitlines()) + 1))
+    chunks = chunk_lines(text, max_chars=max_chars, overlap_lines=overlap)
+    for a, b in pairwise(chunks):
+        assert b.end > a.end, f"{b} is contained in {a}"  # C8
+    assert sum(c.end - c.start + 1 for c in chunks) <= 2 * len(text.splitlines())  # C6 (F6 fixed)
+
+
+@given(short_lines_st, st.integers(-5, -1))
+def test_chunk_lines_rejects_negative_overlap(lines, overlap):
+    with pytest.raises(ValueError):  # C5' (F5 fixed)
+        chunk_lines("\n".join(lines), max_chars=1, overlap_lines=overlap)
 
 
 # --- O: outputs.clip ---------------------------------------------------------------------
@@ -217,8 +222,7 @@ def test_normalize_verdict_never_approves_serious_findings(core):
 GOOD_JSON = json.dumps({"verdict": "approve", "summary": "fine", "findings": []})
 
 
-@pytest.mark.xfail(strict=True, reason="SPEC R1: the 'cut to fit the context' is off by one token")
-def test_review_cut_fits_the_context_exactly(tmp_path: Path):
+def test_review_cut_fits_the_context_exactly(tmp_path: Path):  # V3 (F2 fixed)
     settings = Settings(data_dir=tmp_path, num_ctx=16384, max_input_chars=90_000)
     fake = FakeBackend(replies=[GOOD_JSON])
     app = build_app(settings, backend=fake)
@@ -228,6 +232,38 @@ def test_review_cut_fits_the_context_exactly(tmp_path: Path):
     sent = fake.calls[0][1][1]["content"]
     body = sent[len("```diff\n") : -len("\n```")]
     assert estimate_tokens(body) + 400 + MAX_PREDICT <= settings.num_ctx
+
+
+# --- M: summarize budgets ------------------------------------------------------------------
+@given(st.integers(1, 131072), st.text(max_size=60))
+def test_summarize_budgets_fit_the_context(num_ctx, question):
+    single, chunk = summarize_tool.budgets(num_ctx, question)
+    if chunk < summarize_tool.MIN_CHUNK_CHARS:
+        return  # summarize() refuses such a num_ctx before any model call
+    assert chunk <= single  # the fold loop converges
+    focus = summarize_tool._focus(question)
+    headings = 200  # 'Summarize the following.' / 'Section: <path> lines a-b' / '### <path>'
+    assert estimate_tokens(summarize_tool.REDUCE_SYSTEM) + estimate_tokens(focus) + estimate_tokens(
+        "x" * (single + headings)) + summarize_tool.REDUCE_PREDICT <= num_ctx  # M2: the single pass fits
+    assert estimate_tokens(summarize_tool.MAP_SYSTEM) + estimate_tokens(focus) + estimate_tokens(
+        "x" * (chunk + headings)) + summarize_tool.MAP_PREDICT <= num_ctx  # M2: a map chunk fits
+    if num_ctx >= Settings().num_ctx:
+        assert (single, chunk) == (summarize_tool.SINGLE_PASS_CHARS, summarize_tool.CHUNK_CHARS)  # M1 unchanged
+
+
+def test_summarize_small_context_uses_map_reduce_or_refuses(tmp_path: Path):
+    fake = FakeBackend()
+    text = "\n".join(f"line {k} of a log that is 30k chars long" for k in range(800))  # ~30k: single pass at 32K
+    app = build_app(Settings(data_dir=tmp_path, num_ctx=8192), backend=fake)
+    out = asyncio.run(summarize_tool.summarize(app, paths=None, text=text, question="", timeout_s=30, ctx=None))
+    assert "(map)" in out and len(fake.calls) > 1  # at 8K the same input goes through map-reduce
+    for spec, messages, _ in fake.calls:
+        assert sum(estimate_tokens(m["content"]) for m in messages) + spec.num_predict <= 8192
+
+    fake = FakeBackend()
+    app = build_app(Settings(data_dir=tmp_path, num_ctx=700), backend=fake)
+    out = asyncio.run(summarize_tool.summarize(app, paths=None, text=text, question="", timeout_s=30, ctx=None))
+    assert out.startswith("error:") and "num_ctx" in out and fake.calls == []
 
 
 # --- G: generate.run_generation -----------------------------------------------------------

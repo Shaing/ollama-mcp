@@ -9,15 +9,17 @@ from typing import Any
 from ..app import App
 from ..chunking import Chunk, chunk_lines
 from ..files import FileBlock, is_text
-from ..generate import Progress, run_generation
+from ..generate import Progress, estimate_tokens, run_generation
 from ..outputs import clip, render
 from ..routing import gen_spec
 
-SINGLE_PASS_CHARS = 45_000  # below this, one strong-tier call; above, map-reduce
-CHUNK_CHARS = 12_000  # ~3.5k tokens per map call
+SINGLE_PASS_CHARS = 45_000  # below this, one strong-tier call; above, map-reduce (at the default 32K context)
+CHUNK_CHARS = 12_000  # ~3.5k tokens per map call (at the default 32K context)
 MAP_PREDICT = 600
 REDUCE_PREDICT = 2048
 MAX_TOTAL_CHARS = 20_000_000
+HEADER_TOKENS = 128  # 'Summarize the following.', 'Section: <path> lines a-b', '### <path>' headings
+MIN_CHUNK_CHARS = 500  # below this the context is too small to be worth a map call
 
 MAP_SYSTEM = (
     "You condense one section of a larger document for a later merge step. Keep every concrete detail "
@@ -34,6 +36,22 @@ REDUCE_SYSTEM = (
 def _focus(question: str) -> str:
     q = question.strip()
     return f"\nAnswer/focus on this question: {q}\n" if q else ""
+
+
+def budgets(num_ctx: int, question: str) -> tuple[int, int]:
+    """(single_pass_chars, chunk_chars) that fit num_ctx.
+
+    The module constants are the values for the default 32K context; a smaller context scales
+    them down so estimate_tokens(prompt) + output tokens never exceeds num_ctx (formal/SPEC.md M2).
+    """
+    q = estimate_tokens(_focus(question))
+
+    def chars(system: str, predict: int) -> int:
+        return int((num_ctx - predict - estimate_tokens(system) - q - HEADER_TOKENS - 1) * 3.5)
+
+    single = min(SINGLE_PASS_CHARS, chars(REDUCE_SYSTEM, REDUCE_PREDICT))
+    # a map chunk never exceeds the reduce input, so the fold loop always converges
+    return single, min(CHUNK_CHARS, chars(MAP_SYSTEM, MAP_PREDICT), single)
 
 
 def _gather(paths: list[str], text: str, base: Path) -> tuple[list[FileBlock], list[str]]:
@@ -77,9 +95,17 @@ async def summarize(
             "\n" + "\n".join(notes) if notes else ""
         )
 
+    single_chars, chunk_chars = budgets(settings.num_ctx, question)
+    if chunk_chars < MIN_CHUNK_CHARS:
+        return (
+            f"error: num_ctx={settings.num_ctx} is too small for summarize (no room for {MIN_CHUNK_CHARS} chars of "
+            f"input next to the prompt and {MAP_PREDICT} output tokens); raise OLLAMA_AGENT_NUM_CTX."
+        )
+
     deadline = time.monotonic() + app.clamp_timeout(timeout_s, 300)
     progress = Progress(ctx, "summarize")
     total_chars = sum(len(b.text) for b in blocks)
+    heading_chars = sum(len(str(b.path)) + 6 for b in blocks)  # "### <path>\n" per block in the single-pass prompt
     prompt_tokens = 0
     completion_tokens = 0
     seconds = 0.0
@@ -91,7 +117,7 @@ async def summarize(
         return max(5.0, deadline - time.monotonic())
 
     async with app.semaphore:
-        if total_chars <= SINGLE_PASS_CHARS:
+        if total_chars + heading_chars <= single_chars:
             spec = gen_spec(settings, "strong", think=False, temperature=0.1, num_predict=REDUCE_PREDICT)
             body_in = "\n\n".join(f"### {b.path}\n{b.text}" for b in blocks)
             messages = [
@@ -108,7 +134,7 @@ async def summarize(
         else:
             # Map: fast tier per chunk, sequential so VRAM stays predictable.
             units: list[tuple[str, Chunk]] = [
-                (str(b.path), c) for b in blocks for c in chunk_lines(b.text, max_chars=CHUNK_CHARS, overlap_lines=8)
+                (str(b.path), c) for b in blocks for c in chunk_lines(b.text, max_chars=chunk_chars, overlap_lines=8)
             ]
             map_spec = gen_spec(settings, "fast", think=False, temperature=0.1, num_predict=MAP_PREDICT)
             partials: list[str] = []
@@ -136,9 +162,9 @@ async def summarize(
             # Reduce: strong tier; if the notes themselves are too big, fold them once more.
             reduce_spec = gen_spec(settings, "strong", think=False, temperature=0.1, num_predict=REDUCE_PREDICT)
             joined = "\n\n".join(partials)
-            while len(joined) > SINGLE_PASS_CHARS and time.monotonic() < deadline:
+            while len(joined) > single_chars and time.monotonic() < deadline:
                 folded: list[str] = []
-                for c in chunk_lines(joined, max_chars=CHUNK_CHARS, overlap_lines=0):
+                for c in chunk_lines(joined, max_chars=chunk_chars, overlap_lines=0):
                     res = await run_generation(
                         app.backend,
                         map_spec,

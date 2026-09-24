@@ -31,7 +31,6 @@ from z3 import (
     Ints,
     Not,
     Optimize,
-    Or,
     Solver,
     Sum,
     sat,
@@ -130,21 +129,14 @@ info(f"D: the full {S.max_input_chars}-char budget is always accepted iff max_to
 D = Int("diff_chars")
 MAXP = review.MAX_PREDICT
 need_cut = est(D) + 400 + MAXP > n
-keep = trunc_x35(n - MAXP - 400)
+keep = trunc_x35(n - MAXP - 401)  # the code's formula (F2 fixed: one token of margin)
 kept = If(keep >= 0, zmin(D, keep), zmax(0, D + keep))  # Python slice semantics, incl. a negative stop
 D_sent = If(need_cut, kept, D)
 fits = est(D_sent) + 400 + MAXP <= n
-check("R1", CE, "review_diff: after 'diff further cut to fit the context' the estimate fits num_ctx",
-      [D >= 0, D <= S.max_input_chars, n >= MAXP + 401], fits, show=(D, n),
-      note="off by one token: int(x*3.5) followed by int(y/3.5)+1 rounds up once; harmless "
-           "(the estimate itself is +-20%) but the claim in the note text is not exact")
-check("R1b", CE, "review_diff: same, at the .env example OLLAMA_AGENT_NUM_CTX=16384 with a 90000-char diff",
-      [D == S.max_input_chars, n == 16384], fits, show=(D, n),
-      note="41608 chars are sent; estimate_tokens(41608) + 400 + 4096 = 16385")
-keep_fixed = trunc_x35(n - MAXP - 400 - 1)
-D_fixed = If(need_cut, If(keep_fixed >= 0, zmin(D, keep_fixed), 0), D)
-check("R2", PROVED, "review_diff: the same cut with a 1-token margin fits for every diff and num_ctx (proposed fix)",
-      [D >= 0, n >= MAXP + 401], est(D_fixed) + 400 + MAXP <= n)
+check("R1", PROVED, "review_diff: after 'diff further cut to fit the context' the estimate fits num_ctx "
+      "(any diff, any num_ctx >= MAX_PREDICT + 401)", [D >= 0, n >= MAXP + 401], fits)
+check("R1b", PROVED, "review_diff: same, at the .env example OLLAMA_AGENT_NUM_CTX=16384 with a 90000-char diff",
+      [D == S.max_input_chars, n == 16384], fits)
 check("R3", CE, "review_diff: the cut length is non-negative for every num_ctx >= 1",
       [n >= 1], keep >= 0, show=(n,),
       note=f"num_ctx < {MAXP + 401}: even an empty diff cannot fit; the code slices with a negative "
@@ -161,15 +153,27 @@ check("S1", PROVED, f"summarize: the single-pass prompt (<= {SP} chars) fits the
       [n == S.num_ctx], single_fits)
 check("S2", PROVED, f"summarize: a map chunk ({CH} chars) + {MAP} output tokens fits the default num_ctx",
       [n == S.num_ctx], map_fits)
-POW2 = [2**k for k in range(11, 18)]
-check("S3", CE, "summarize: the single-pass prompt fits every power-of-two num_ctx 2048..131072 that "
-      "OLLAMA_AGENT_NUM_CTX may select", [Or(*[n == p for p in POW2])], single_fits, show=(n,),
-      note="summarize.py ignores settings.num_ctx; Ollama would silently truncate the prompt")
+# budgets(num_ctx, question=""): min(constant, int((num_ctx - predict - est(system) - est("") - HEADER_TOKENS - 1) * 3.5))
+def budget(system_len: int, predict: int):
+    return trunc_x35(n - predict - est(system_len) - est(0) - summarize.HEADER_TOKENS - 1)
+
+
+single_n = zmin(SP, budget(len(summarize.REDUCE_SYSTEM), RED))
+chunk_n = zmin(zmin(CH, budget(len(summarize.MAP_SYSTEM), MAP)), single_n)  # a chunk never exceeds the reduce input
+single_fits_n = est(single_n + len(summarize.REDUCE_SYSTEM) + hdr) + RED <= n
+map_fits_n = est(chunk_n + len(summarize.MAP_SYSTEM) + hdr) + MAP <= n
+check("S3", PROVED, "summarize: with budgets() the single-pass prompt and every map chunk fit ANY num_ctx the tool "
+      f"accepts (chunk budget >= MIN_CHUNK_CHARS={summarize.MIN_CHUNK_CHARS}); F1 fixed",
+      [n >= 1, chunk_n >= summarize.MIN_CHUNK_CHARS], And(single_fits_n, map_fits_n))
+check("S4", PROVED, "summarize: at the default num_ctx budgets() returns the module constants unchanged",
+      [n == S.num_ctx], And(single_n == SP, chunk_n == CH))
+check("S5", PROVED, "summarize: whenever it accepts num_ctx, the fold loop's chunk fits its reduce input (convergence)",
+      [n >= 1, chunk_n >= summarize.MIN_CHUNK_CHARS], chunk_n <= single_n)
 o = Optimize()
-o.add(n >= 1, single_fits, map_fits)
+o.add(n >= 1, chunk_n >= summarize.MIN_CHUNK_CHARS)
 o.minimize(n)
 o.check()
-info(f"S: summarize's constants are safe only for num_ctx >= {o.model()[n]} (so 16384 ok, 8192 not)")
+info(f"S: summarize accepts num_ctx >= {o.model()[n]} and refuses below (was: silent overflow below 15038)")
 
 # --- O: outputs.clip ----------------------------------------------------------------------
 # if len <= max: unchanged. else head = text[:max]; nl = head.rfind('\n'); if nl > max*0.6: head = head[:nl]
@@ -204,20 +208,18 @@ check("C1", PROVED, f"chunk_lines: a chunk holding >= 2 lines is shorter than ma
 check("C2", PROVED, "chunk_lines: a chunk longer than max_chars is exactly one (long) line",
       c_hyp, Implies(text_len > mc, n_lines == 1))
 
-# outer loop: i = max(j - overlap_lines, i + 1)
+# outer loop: i = max(j - min(overlap_lines, (j - i) // 2), i + 1); overlap_lines < 0 raises ValueError (F5 fixed)
 i, j, ov = Ints("i j overlap_lines")
-nxt = zmax(j - ov, i + 1)
-check("C3", PROVED, "chunk_lines: the window always advances (termination)", [i >= 0, j > i], nxt > i)
-check("C4", PROVED, "chunk_lines: no line is skipped between consecutive chunks when overlap_lines >= 0",
-      [i >= 0, j > i, ov >= 0], nxt <= j)
-check("C5", CE, "chunk_lines: no line is skipped between consecutive chunks for ANY overlap_lines",
-      [i >= 0, j > i], nxt <= j, show=(i, j, ov),
-      note="a negative overlap_lines silently drops lines; there is no ValueError guard like the one for max_chars")
-check("C6", PROVED, "chunk_lines: a chunk holding <= overlap_lines lines advances the window by exactly one line",
-      [i >= 0, j > i, ov >= 0, j - i <= ov], nxt == i + 1,
-      note=f"stride collapses to 1 line: summarize (chunk {CH}, overlap 8) once lines are >= {CH // 9} chars "
-           f"-> up to 8x the map input; search index (chunk 1500, overlap 3) once lines are >= {1500 // 4} chars "
-           "-> up to 3x the embeddings")
+c_lines = j - i
+nxt = zmax(j - zmin(ov, c_lines / 2), i + 1)
+c_hyp2 = [i >= 0, j > i, ov >= 0]
+check("C3", PROVED, "chunk_lines: the window always advances (termination)", c_hyp2, nxt > i)
+check("C4", PROVED, "chunk_lines: no line is skipped between consecutive chunks", c_hyp2, nxt <= j)
+check("C5", PROVED, "chunk_lines: consecutive chunks share at most min(overlap_lines, half the chunk) lines",
+      c_hyp2, And(j - nxt <= ov, 2 * (j - nxt) <= c_lines))
+check("C6", PROVED, "chunk_lines: every chunk advances the window by at least half its lines, so the chunks' "
+      "total text is at most ~2x the input (F6 fixed; was 1 line per chunk for long lines)",
+      c_hyp2, 2 * (nxt - i) >= c_lines)
 
 # --- summary --------------------------------------------------------------------------------
 bad = [cid for cid, _, ok in _results if not ok]

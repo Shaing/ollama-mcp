@@ -35,8 +35,9 @@ uv run pytest tests/test_properties.py tests/test_spec_static.py
 ## Keeping it honest
 
 Some checks are *expected* to fail: the `COUNTEREXAMPLE` expectations in `verify.py`, the
-`violation NoReload` line in `tla/OllamaAgent_trio_foreign.cfg`, and the strict xfails in
-`tests/test_properties.py`. Each maps to a finding in `SPEC.md`. When the code is fixed, the
+`violation NoReload` line in `tla/OllamaAgent_trio_foreign.cfg`, and any strict xfails in
+`tests/test_properties.py` (none at the moment: the four findings that had them are fixed). Each
+maps to a finding in `SPEC.md`. When the code is fixed, the
 check flips and the run fails until the expectation is removed and the SPEC.md row is updated,
 so the spec cannot silently drift from the code in either direction.
 

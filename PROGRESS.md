@@ -107,3 +107,13 @@
 
 細節、反例與建議修法見 `formal/SPEC.md` 末段。
 
+### 修正（16:40）
+
+F1、F2、F5、F6 已修（commit 見 git log），`formal/run.sh` 全綠；`uv run pytest` **57 passed / 7 skipped**、不再有 xfail；Z3 23 條中 20 條證明成立、3 條是保留的邊角反例（F3、F8 與 F4 的文件措辭）。
+
+- F1：`summarize` 新增 `budgets(num_ctx, question)`，門檻隨 `num_ctx` 縮放，map chunk 不超過 reduce 輸入（fold 迴圈必收斂），`num_ctx < 2,397` 在呼叫模型前直接回錯誤；32K 時與原常數相同（Z3 S3–S5 證明）。
+- F6：`chunk_lines` 的 overlap 上限為半塊，且每塊一定比前一塊多至少一行；輸出行數 ≤ 2× 輸入（Z3 C5、C6 證明，Hypothesis 驗證）。
+- F2：review 的裁切改減 401 token，對所有 diff 與 `num_ctx` 都放得進 context（Z3 R1、R1b）。
+- F5：`overlap_lines < 0` 拋 `ValueError`。
+- 仍開放：F3、F4、F7、F8、F9（邊角設定與文件），見 `formal/SPEC.md` 末段。
+

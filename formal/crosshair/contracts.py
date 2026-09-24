@@ -45,7 +45,8 @@ def chunk_lines_contract(lines: list[str], max_chars: int, overlap_lines: int) -
     pre: all(1 <= len(ln) <= 5 and all(ch in "ab" for ch in ln) for ln in lines)
     post: __return__[0][0] == 1 and __return__[-1][1] == len(lines)
     post: all(s <= e for s, e in __return__)
-    post: all(b[0] == max(a[1] - overlap_lines + 1, a[0] + 1) for a, b in zip(__return__, __return__[1:]))
+    post: all(b[1] > a[1] and b[0] <= a[1] + 1 for a, b in zip(__return__, __return__[1:]))
+    post: all(a[1] - b[0] + 1 <= min(overlap_lines, (a[1] - a[0] + 1) // 2) for a, b in zip(__return__, __return__[1:]))
     post: all(len(chr(10).join(lines[s - 1:e])) <= max_chars or s == e for s, e in __return__)
     """
     return [(c.start, c.end) for c in chunk_lines("\n".join(lines), max_chars=max_chars, overlap_lines=overlap_lines)]

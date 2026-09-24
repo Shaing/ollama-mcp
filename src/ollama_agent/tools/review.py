@@ -75,7 +75,7 @@ async def _git_diff(cwd: Path, git_range: str) -> tuple[str, str | None]:
         out, err = await asyncio.wait_for(proc.communicate(), timeout=GIT_TIMEOUT_S)
     except FileNotFoundError:
         return "", "git is not installed or not on PATH"
-    except asyncio.TimeoutError:
+    except TimeoutError:
         return "", f"git diff timed out after {GIT_TIMEOUT_S}s"
     if proc.returncode != 0:
         return "", f"git diff failed: {err.decode(errors='replace').strip()}"
@@ -136,7 +136,7 @@ async def review_diff(
     spec = gen_spec(settings, "strong", think=think, temperature=0.1, num_predict=MAX_PREDICT)
     est = estimate_tokens(diff_text) + 400
     if est + MAX_PREDICT > spec.num_ctx:
-        keep = int((spec.num_ctx - MAX_PREDICT - 400) * 3.5)
+        keep = int((spec.num_ctx - MAX_PREDICT - 401) * 3.5)  # -1: estimate_tokens rounds up (formal/SPEC.md V3)
         notes.append(f"diff further cut to ~{keep} chars to fit the {spec.num_ctx}-token context")
         diff_text = diff_text[:keep]
 
