@@ -3,7 +3,7 @@
     "ollama-agent": {
       "type": "stdio",
       "command": "uv",
-      "args": ["run", "--project", "/home/ah/work/ollama", "ollama-agent"],
+      "args": ["run", "ollama-agent"],
       "env": {
         "OLLAMA_AGENT_PROFILE": "${OLLAMA_AGENT_PROFILE:-trio}"
       },
