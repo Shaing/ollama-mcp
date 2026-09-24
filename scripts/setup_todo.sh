@@ -17,6 +17,11 @@
 # 沒放進來的: bin/claude-local 煙霧測試（會載入 35B、把 trio 擠出 GPU，要用時手動跑）。
 set -euo pipefail
 
+if [[ $EUID -eq 0 ]]; then
+    echo "請用一般使用者執行（不要加 sudo）：需要 sudo 的指令腳本會自己呼叫，並詢問密碼。" >&2
+    exit 1
+fi
+
 HERE="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$HERE"
 unset VIRTUAL_ENV || true   # 別的專案 venv 啟用中會干擾 uv

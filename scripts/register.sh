@@ -7,7 +7,8 @@ HERE="$(cd "$(dirname "$0")/.." && pwd)"
 PROFILE="${OLLAMA_AGENT_PROFILE:-trio}"
 
 uv tool install --editable "$HERE" --force
-BIN="$(command -v ollama-agent || echo "$HOME/.local/bin/ollama-agent")"
+# Not `command -v`: an activated repo .venv would shadow the uv tool install.
+BIN="$(uv tool dir --bin)/ollama-agent"
 "$BIN" --check
 
 claude mcp remove --scope user ollama-agent >/dev/null 2>&1 || true
