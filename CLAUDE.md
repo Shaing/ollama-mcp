@@ -33,3 +33,11 @@ start or stop: `svc status ollama-agent` lists the running copies and the sessio
 `svc check ollama-agent` runs `--check`, `svc logs ollama-agent` tails the newest MCP log.
 If this project ever grows a long-running part (e.g. a shared HTTP MCP server), register it as its
 own service per `~/work/ops/README.md`.
+
+## Keep the repo publishable
+
+`PROGRESS.md`, docs and commit messages must not contain the machine's hostname, internal IPs,
+personal or company e-mail addresses, or other people's names. Describe the host by its hardware
+("本機，RTX 4080 16 GB") and the reporter as "專案維護者". A global git pre-commit hook
+(`~/.config/git/hooks/pre-commit`, patterns in `~/.config/git/sensitive-patterns` and
+`.git/info/sensitive-patterns`) rejects such additions; fix the text instead of using `--no-verify`.

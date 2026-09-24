@@ -2,8 +2,8 @@
 
 - 回報時間：2026-09-24 11:30 (CST)（前次：2026-09-24 10:55）
 - 專案：`~/work/ollama`（ollama-agent，Python MCP server，把本機 Ollama 模型變成 Claude Code 的工具）
-- 主機：<host>，RTX 4080 16 GB，62 GB RAM，Ollama 0.34.3
-- 回報人：<email>（由 Claude 依程式碼、測試結果與系統狀態整理）
+- 主機：本機（RTX 4080 16 GB，62 GB RAM，Ollama 0.34.3）
+- 回報人：專案維護者（由 Claude 依程式碼、測試結果與系統狀態整理）
 
 ## 一、一句話結論
 
