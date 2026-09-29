@@ -1,6 +1,6 @@
 # ollama-agent — 進度回報
 
-- 回報時間：2026-09-29 12:05 (CST)（前次：2026-09-24 16:05）
+- 回報時間：2026-09-29 16:25 (CST)（前次：2026-09-29 12:05）
 - 專案：`~/work/ollama`（ollama-agent，Python MCP server，把本機 Ollama 模型變成 Claude Code 的工具）
 - 主機：本機（RTX 4080 16 GB，62 GB RAM，Ollama 0.34.3）
 - 回報人：專案維護者（由 Claude 依程式碼、測試結果與系統狀態整理）
@@ -126,3 +126,11 @@ F1、F2、F5、F6 已修（commit 見 git log），`formal/run.sh` 全綠；`uv 
 - 只有思考、沒有答案時回傳加一條 warning，指向輸出檔；撞到長度上限時提示加大 `max_tokens` 或關 think。
 
 驗證：Z3 新增 D5（開 think 且用預設時 `num_predict ≥ 4096`，放得下就是 8192）、D6（新預設不會拒絕舊的固定 4096 會接受的輸入），D1、D2 改成涵蓋 think；`uv run pytest` 62 passed / 7 skipped（新增 5 個測試），`formal/run.sh` 全綠。真實 9B 重跑 A1：預設額度 8192，用了 4063 tokens、55.4 s，有答案且思考存檔；故意傳 `max_tokens=1024` 時回「(model returned no text)」加上述 warning，思考內容在輸出檔裡。
+
+### `review_diff` 的同類問題（2026-09-29 16:25）
+
+`review_diff` 預設開 think、上限 4096。思考吃光額度時，`truncated` 會讓它跳過「不開 think 重試一次」，直接回 fallback 的 `comment`（空內容），還附上不適用的「raise max_tokens」提示（這個工具沒有這個參數）。用真實 9B 審 `fa3a76d` 的 src diff（約 100 行）重現：第一次就發生，54 s 回空結果。
+
+修法：開 think 且撞到長度上限、JSON 又無效時，同一個問題不開 think 再問一次（沒有可修正的 JSON，所以不加修正提示），notes 說明原因、不再轉述「raise max_tokens」；沒開 think 的長度截斷維持不重試。思考內容比照 `delegate_task` 存在輸出檔。上限維持 4096，因為 diff 的裁切與 Z3 R1 都以它為準。
+
+驗證：SPEC 新增 V6；`uv run pytest` 64 passed / 7 skipped（新增 2 個測試，`ThinkingBackend` 移到 `conftest.py` 共用）。真實 9B：修正後同一個 diff 用預設值 17 s 就有結果（這次思考沒有超過額度）；把上限壓到 1024 強制走重試路徑，兩次都是「思考吃光 → 不開 think 重試 → 有效的 review」，各 16.5 s。

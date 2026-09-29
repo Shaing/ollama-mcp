@@ -149,6 +149,7 @@ async def review_diff(
     total_seconds = 0.0
     core: ReviewCore | None = None
     raw = ""
+    thinking = ""
     model = spec.model
     async with app.semaphore:
         for attempt in range(2):
@@ -158,18 +159,26 @@ async def review_diff(
             total_seconds += result.seconds
             raw = result.text
             model = result.model
-            notes.extend(result.warnings)
+            thinking += result.thinking
+            # Thinking counts against num_predict: the 9B can spend all of it before the JSON starts.
+            thought_out = spec.think and result.reason == "length"
+            if not thought_out:
+                notes.extend(result.warnings)  # its "raise max_tokens" hint does not apply to this tool
             try:
                 core = ReviewCore.model_validate_json(raw)
                 break
             except ValidationError as exc:
                 log.warning("review JSON invalid on attempt %d: %s", attempt + 1, exc.errors()[:2])
-                if result.truncated:
+                if thought_out:
+                    # Nothing usable to correct: ask the same question again, without thinking.
+                    notes.append(f"thinking used the whole {MAX_PREDICT}-token budget; retried without thinking")
+                elif result.truncated:
                     break  # a retry would time out again
-                messages = messages + [
-                    {"role": "assistant", "content": raw},
-                    {"role": "user", "content": "That was not valid JSON for the schema. Emit only the JSON object."},
-                ]
+                else:
+                    messages = messages + [
+                        {"role": "assistant", "content": raw},
+                        {"role": "user", "content": "That was not valid JSON for the schema. Emit only the JSON object."},
+                    ]
                 spec = gen_spec(settings, "strong", think=False, temperature=0.0, num_predict=MAX_PREDICT)
     if core is None:
         core = _fallback(raw, "schema validation failed")
@@ -180,6 +189,7 @@ async def review_diff(
         "review_diff",
         core.model_dump_json(indent=2),
         {"model": model, "seconds": round(total_seconds, 2), "diff_chars": len(diff_text), "focus": focus, "notes": notes},
+        thinking=thinking,
     )
     return ReviewResult(
         **core.model_dump(),

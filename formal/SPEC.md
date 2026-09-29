@@ -104,6 +104,7 @@ Model: `formal/tla/OllamaAgent.tla`; configurations `trio` (2 permits, 3 calls, 
 | V1 | `_normalize_verdict` docstring | The returned verdict is never `approve` when a finding is `critical` or `major`. | PBT `test_normalize_verdict_never_approves_serious_findings` |
 | V2 | — | Only the verdict may change, and then exactly one note is appended. | PBT |
 | V5 | `review_diff` docstring; `tests/test_review.py` | Invalid JSON is retried once (plain, deterministic), then falls back to a `comment` verdict carrying the raw text; an empty diff short-circuits with `approve` and no model call. | TESTED |
+| V6 | — | When thinking uses the whole output budget (`think` on, `done_reason == "length"`) and the JSON is invalid, the same prompt is retried once without thinking (no correction turn), with a note saying so; the generic "raise max_tokens" warning is not passed on (the tool has no such parameter). A length cut without thinking is still not retried. The thinking is saved after the review in the output file. | TESTED `test_review_retries_without_thinking_when_thinking_used_the_budget`, `test_review_does_not_retry_a_plain_length_cut` |
 | G1 | `run_generation` docstring "on timeout return what arrived so far" | Everything streamed before the stop is returned. | PBT `test_run_generation_reports_the_length_cap`; TESTED (timeout) |
 | G2 | — | `truncated` ⇔ timeout or `done_reason == "length"`; `reason` names which. | PBT; TESTED |
 | G3 | — | Exactly one warning is attached iff truncated. | PBT |

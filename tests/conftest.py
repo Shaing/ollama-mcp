@@ -76,6 +76,25 @@ class FakeBackend:
         return "fake"
 
 
+class ThinkingBackend(FakeBackend):
+    """Each call pops one (thinking, reply, done_reason) from `script`: streams the thinking, then the reply."""
+
+    def __init__(self, *script: tuple[str, str, str]) -> None:
+        super().__init__()
+        self.script = list(script)
+
+    async def stream_chat(
+        self, spec: GenSpec, messages: Sequence[dict[str, Any]], format: dict[str, Any] | None = None
+    ) -> AsyncIterator[ChatChunk]:
+        self.calls.append((spec, list(messages), format))
+        thinking, reply, done_reason = self.script.pop(0)
+        if thinking:
+            yield ChatChunk(thinking=thinking)
+        if reply:
+            yield ChatChunk(content=reply)
+        yield ChatChunk(done=True, done_reason=done_reason, prompt_eval_count=10, eval_count=spec.num_predict)
+
+
 @pytest.fixture
 def settings(tmp_path: Path) -> Settings:
     return Settings(data_dir=tmp_path / "data", max_timeout_s=600)

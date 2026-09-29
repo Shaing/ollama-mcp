@@ -1,11 +1,10 @@
 from pathlib import Path
 
-from ollama_agent.backend import ChatChunk
 from ollama_agent.generate import Progress, estimate_tokens, run_generation
 from ollama_agent.routing import GenSpec, gen_spec
 from ollama_agent.server import build_app
 from ollama_agent.tools.delegate import delegate_task
-from tests.conftest import FakeBackend
+from tests.conftest import FakeBackend, ThinkingBackend
 
 
 async def test_delegate_uses_tier_and_saves_output(app, fake: FakeBackend, tmp_path: Path):
@@ -69,20 +68,6 @@ def test_gen_spec_caps(app):
     assert spec.num_ctx == 32768
 
 
-class ThinkingBackend(FakeBackend):
-    """Streams `thinking` first, then the reply; ends with `done_reason`."""
-
-    def __init__(self, thinking: str, reply: str, done_reason: str = "stop") -> None:
-        super().__init__()
-        self.thinking, self.reply, self.done_reason = thinking, reply, done_reason
-
-    async def stream_chat(self, spec, messages, format=None):
-        self.calls.append((spec, list(messages), format))
-        yield ChatChunk(thinking=self.thinking)
-        if self.reply:
-            yield ChatChunk(content=self.reply)
-        yield ChatChunk(done=True, done_reason=self.done_reason, prompt_eval_count=10, eval_count=spec.num_predict)
-
 
 async def test_delegate_default_budget_depends_on_think(app, fake: FakeBackend):
     for think, max_tokens, expected in [(False, 0, 4096), (True, 0, 8192), (True, 2048, 2048), (False, 8192, 8192)]:
@@ -103,7 +88,7 @@ async def test_delegate_think_default_shrinks_to_fit_the_context(app, fake: Fake
 
 
 async def test_delegate_saves_thinking_and_warns_when_only_thinking(settings):
-    backend = ThinkingBackend("Let me reason about durations...", "", done_reason="length")
+    backend = ThinkingBackend(("Let me reason about durations...", "", "length"))
     app = build_app(settings, backend=backend)
     out = await delegate_task(app, task="write parse_duration", context_files=None, model_tier="strong",
                               think=True, max_tokens=0, timeout_s=30, ctx=None)
@@ -115,7 +100,7 @@ async def test_delegate_saves_thinking_and_warns_when_only_thinking(settings):
 
 
 async def test_delegate_keeps_thinking_after_the_answer(settings):
-    backend = ThinkingBackend("step 1, step 2", "def f(): ...")
+    backend = ThinkingBackend(("step 1, step 2", "def f(): ...", "stop"))
     app = build_app(settings, backend=backend)
     out = await delegate_task(app, task="f", context_files=None, model_tier="strong", think=True,
                               max_tokens=0, timeout_s=30, ctx=None)
@@ -125,7 +110,7 @@ async def test_delegate_keeps_thinking_after_the_answer(settings):
 
 
 async def test_delegate_suggests_a_larger_budget_only_below_the_cap(settings):
-    app = build_app(settings, backend=ThinkingBackend("hmm", "", done_reason="length"))
+    app = build_app(settings, backend=ThinkingBackend(("hmm", "", "length")))
     out = await delegate_task(app, task="f", context_files=None, model_tier="strong", think=True,
                               max_tokens=1024, timeout_s=30, ctx=None)
     assert "spent its 1024-token budget thinking" in out and "larger max_tokens (cap 8192)" in out

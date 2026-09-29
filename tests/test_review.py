@@ -2,8 +2,9 @@ import json
 import subprocess
 from pathlib import Path
 
-from ollama_agent.tools.review import ReviewCore, review_diff
-from tests.conftest import FakeBackend
+from ollama_agent.server import build_app
+from ollama_agent.tools.review import MAX_PREDICT, ReviewCore, review_diff
+from tests.conftest import FakeBackend, ThinkingBackend
 
 GOOD = json.dumps(
     {
@@ -77,3 +78,25 @@ async def test_review_reports_git_errors(app, fake: FakeBackend, tmp_path: Path)
     res = await review_diff(app, diff="", git_range="", cwd=str(tmp_path), focus="", think=False, timeout_s=60,
                             ctx=None)
     assert res.verdict == "comment" and "git diff failed" in res.summary
+
+
+async def test_review_retries_without_thinking_when_thinking_used_the_budget(settings):
+    # Measured 2026-09-29: the 9B spent all 4096 tokens thinking on a ~100-line diff and emitted nothing.
+    backend = ThinkingBackend(("long deliberation", "", "length"), ("", GOOD, "stop"))
+    app = build_app(settings, backend=backend)
+    res = await review_diff(app, diff="+x", git_range="", cwd="", focus="", think=True, timeout_s=60, ctx=None)
+    assert res.verdict == "request_changes" and len(res.findings) == 1
+    first, retry = backend.calls
+    assert first[0].think is True and retry[0].think is False
+    assert retry[1] == first[1]  # same question again: there was no JSON to correct
+    assert any(f"whole {MAX_PREDICT}-token budget" in n for n in res.notes)
+    assert not any("max_tokens" in n for n in res.notes)  # review_diff has no such parameter
+    saved = Path(res.output_path).read_text()
+    assert saved.index('"verdict"') < saved.index("thinking (not part of the answer)") < saved.index("long deliberation")
+
+
+async def test_review_does_not_retry_a_plain_length_cut(settings):
+    backend = ThinkingBackend(("", '{"verdict": "comm', "length"))
+    app = build_app(settings, backend=backend)
+    res = await review_diff(app, diff="+x", git_range="", cwd="", focus="", think=False, timeout_s=60, ctx=None)
+    assert len(backend.calls) == 1 and res.verdict == "comment"
