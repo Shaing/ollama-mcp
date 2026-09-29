@@ -24,12 +24,16 @@ class OutputStore:
     def __init__(self, data_dir: Path) -> None:
         self.dir = data_dir / "outputs"
 
-    def save(self, tool: str, text: str, meta: dict[str, Any]) -> Path:
+    def save(self, tool: str, text: str, meta: dict[str, Any], *, thinking: str = "") -> Path:
+        """Write meta as a leading comment, then the text; the model's thinking, if any, goes last."""
         self.dir.mkdir(parents=True, exist_ok=True)
         stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
         path = self.dir / f"{stamp}-{tool}-{secrets.token_hex(4)}.md"
         front = json.dumps(meta, indent=2, default=str, ensure_ascii=False)
-        path.write_text(f"<!-- ollama-agent {tool}\n{front}\n-->\n\n{text}\n", encoding="utf-8")
+        tail = ""
+        if thinking.strip():
+            tail = f"\n<!-- ollama-agent thinking (not part of the answer) -->\n\n{thinking.strip()}\n"
+        path.write_text(f"<!-- ollama-agent {tool}\n{front}\n-->\n\n{text}\n{tail}", encoding="utf-8")
         return path
 
 

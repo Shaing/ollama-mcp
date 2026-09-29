@@ -100,20 +100,33 @@ check("T3", CE, "clamp_timeout never exceeds max_timeout_s for ANY max_timeout_s
       note="the 5 s floor wins over a smaller OLLAMA_AGENT_MAX_TIMEOUT_S (config edge, not reachable with defaults)")
 
 # --- D: tools/delegate.py -----------------------------------------------------------------
-# num_predict = max(64, min(int(max_tokens or 4096), MAX_PREDICT))
-# reject when estimate_tokens(user) + estimate_tokens(SYSTEM_PROMPT) + num_predict > num_ctx
+# e = estimate_tokens(user) + estimate_tokens(SYSTEM_PROMPT)
+# if max_tokens: num_predict = max(64, min(int(max_tokens), MAX_PREDICT))
+# else:          num_predict = max(DEFAULT_PREDICT, min(MAX_PREDICT if think else DEFAULT_PREDICT, num_ctx - e))
+# reject when e + num_predict > num_ctx
 mt, U, n = Ints("max_tokens user_chars num_ctx")
-np_ = zmax(64, zmin(If(mt != 0, mt, 4096), delegate.MAX_PREDICT))
-check("D1", PROVED, f"delegate_task clamps num_predict to [64, {delegate.MAX_PREDICT}]", [],
-      And(np_ >= 64, np_ <= delegate.MAX_PREDICT))
-
+think = Bool("think")
 HEADERS = 2000  # '## Context files' + '### FILE: <path>' fences for a handful of files
 sys_est = est(len(delegate.SYSTEM_PROMPT))
-accepted = est(U) + sys_est + np_ <= n
+e = est(U) + sys_est
+DP = delegate.DEFAULT_PREDICT
+auto = zmax(DP, zmin(If(think, delegate.MAX_PREDICT, DP), n - e))
+np_ = If(mt != 0, zmax(64, zmin(mt, delegate.MAX_PREDICT)), auto)
+check("D1", PROVED, f"delegate_task clamps num_predict to [64, {delegate.MAX_PREDICT}] (any think, any input)",
+      [U >= 0], And(np_ >= 64, np_ <= delegate.MAX_PREDICT))
+
+accepted = e + np_ <= n
 budget = [U >= 0, U <= S.max_input_chars + HEADERS, n == S.num_ctx]
 check("D2", PROVED, f"delegate_task accepts every input inside the {S.max_input_chars}-char budget "
-      f"(+{HEADERS} header chars) at the default max_tokens=4096, num_ctx={S.num_ctx}",
-      budget + [mt == 4096], accepted)
+      f"(+{HEADERS} header chars) at the default max_tokens (0), think on or off, num_ctx={S.num_ctx}",
+      budget + [mt == 0], accepted)
+check("D5", PROVED, f"delegate_task with think=true and the default max_tokens: num_predict is never below "
+      f"{DP}, and is {delegate.MAX_PREDICT} whenever the context has room for it (any num_ctx)",
+      [U >= 0, mt == 0, think],
+      And(np_ >= DP, Implies(e + delegate.MAX_PREDICT <= n, np_ == delegate.MAX_PREDICT)))
+check("D6", PROVED, "delegate_task: the default max_tokens accepts every input that the old fixed default "
+      f"{DP} accepted (any think, any input, any num_ctx)",
+      [U >= 0, mt == 0, e + DP <= n], accepted)
 check("D3", CE, "... and also at the MAX_PREDICT cap max_tokens=8192",
       budget + [mt == 8192], accepted, show=(U,),
       note="the docstring's '~90k chars total' holds only up to the max_tokens reported below")

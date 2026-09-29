@@ -74,6 +74,7 @@ Model: `formal/tla/OllamaAgent.tla`; configurations `trio` (2 permits, 3 calls, 
 | O2 | `clip` docstring | `truncated` is exactly `len(text) > max_chars`. | PROVED (O2); BOUNDED; PBT |
 | O3 | docstring "Cuts at a line boundary when possible" | A truncated head keeps ≥ 60 % of `max_chars`, is a prefix of the text, and when shorter than `max_chars` the cut is immediately before a `\n`. | PROVED (O3); BOUNDED; PBT |
 | O4 | README "Full outputs are always written … Claude gets the head plus the path" | The rendered reply carries the model/token/time footer, a `[truncated …]` marker when clipped, the output path and every warning. | TESTED `test_store_and_render` |
+| O5 | `delegate_task` docstring "Output (and any thinking) is saved to a file" | The model's thinking, when there is any, is written after the answer under a `thinking (not part of the answer)` marker and never appears in the reply. Thinking with no answer adds a warning pointing at the file, and at `max_tokens` when the length cap was hit. | TESTED `test_delegate_saves_thinking_and_warns_when_only_thinking`, `test_delegate_keeps_thinking_after_the_answer` |
 
 ## 5. Budgets and context fitting (`files.py`, `tools/delegate.py`, `tools/review.py`, `tools/summarize.py`, `app.py`)
 
@@ -82,10 +83,12 @@ Model: `formal/tla/OllamaAgent.tla`; configurations `trio` (2 permits, 3 calls, 
 | F1 | `read_paths` docstring "Stops adding files once the budget is exhausted" | Σ chars of returned blocks ≤ `budget_chars`. | PBT `test_read_paths_budget_and_accounting` |
 | F2 | docstring "notes explain every skip" | `len(blocks) + len(notes) == len(paths)`: every path is either read or explained. | PBT |
 | F3 | — | Input order is preserved; missing / binary files are skipped with a note. | PBT |
-| D1 | `delegate_task` docstring `max_tokens` | `num_predict` is clamped to `[64, 8192]`. | PROVED (D1) |
-| D2 | docstring "~90k chars total" + "NOT for … more than ~32K tokens" | Every input within the 90 000-char budget (+2 000 chars of file headers) is accepted at the default `max_tokens=4096`, `num_ctx=32768`. | PROVED (D2) |
+| D1 | `delegate_task` docstring `max_tokens` "(max 8192)" | `num_predict` is clamped to `[64, 8192]`, with or without think. | PROVED (D1) |
+| D2 | docstring "~90k chars total" + "NOT for … more than ~32K tokens" | Every input within the 90 000-char budget (+2 000 chars of file headers) is accepted at the default `max_tokens` (0), think on or off, `num_ctx=32768`. | PROVED (D2) |
 | D3 | same | …and at any `max_tokens` up to the cap. | **VIOLATED** — F4: holds only for `max_tokens ≤ 6383`; at 8192 inputs above ~85.6 k chars are refused. PROVED counterexample (D3) |
 | D4 | — | A refused input makes no backend call. | TESTED `test_delegate_rejects_oversized_input` |
+| D5 | docstring "leave it 0 … with `think=true` as much as the context allows up to 8192" | With `think=true` and the default `max_tokens`, `num_predict ≥ 4096`, and `= 8192` whenever the input leaves room for it (any `num_ctx`). An explicit `max_tokens` is used as given (clamped by D1). | PROVED (D5); TESTED `test_delegate_default_budget_depends_on_think`, `test_delegate_think_default_shrinks_to_fit_the_context` |
+| D6 | — | The think-aware default never refuses an input that the former fixed default of 4096 accepted (any think, any input, any `num_ctx`). | PROVED (D6) |
 | V3 | `review_diff` note "diff further cut to ~N chars to fit the num_ctx-token context" | After the cut, `estimate_tokens(diff) + 400 + 4096 ≤ num_ctx`. | PROVED (R1 for every diff and `num_ctx ≥ 4497`; R1b concrete); TESTED `test_review_cut_fits_the_context_exactly` (F2 fixed) |
 | V4 | — | The cut length is non-negative for every `num_ctx`. | **VIOLATED** for `num_ctx < 4497` — F3. PROVED counterexample (R3) |
 | M1 | `summarize` map-reduce design | The single-pass prompt (≤ 45 000 chars) and each map chunk (12 000 chars) fit the default 32 K context. | PROVED (S1, S2) |

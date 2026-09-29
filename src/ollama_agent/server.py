@@ -76,7 +76,7 @@ def build_server(settings: Settings, backend: Backend | None = None) -> MCPServe
         context_files: list[str] | None = None,
         model_tier: Literal["strong", "fast"] = "strong",
         think: bool = False,
-        max_tokens: int = 4096,
+        max_tokens: int = 0,
         timeout_s: int = 120,
     ) -> str:
         """Run a self-contained subtask on a LOCAL model and return its text.
@@ -84,8 +84,11 @@ def build_server(settings: Settings, backend: Backend | None = None) -> MCPServe
         Good for: boilerplate, unit tests for a given file, docstrings, log triage, rewrites,
         first drafts, mechanical transformations. Pass the files it needs in `context_files`
         (absolute paths, ~90k chars total). `model_tier="fast"` is ~1.4x quicker for simple
-        jobs; `think=true` adds reasoning for tricky ones (slower). Output is saved to a file
-        whose path is returned, so ask for long outputs freely.
+        jobs; `think=true` adds reasoning for tricky ones (slower). `max_tokens` caps the
+        output including thinking (max 8192); leave it 0 for the default: 4096, or with
+        `think=true` as much as the context allows up to 8192, since thinking alone can use
+        4096. Output (and any thinking) is saved to a file whose path is returned, so ask for
+        long outputs freely.
 
         NOT for: final correctness decisions, reasoning about the whole repo, tasks needing
         more than ~32K tokens of context, or anything you must get right without checking.

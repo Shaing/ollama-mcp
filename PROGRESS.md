@@ -1,6 +1,6 @@
 # ollama-agent — 進度回報
 
-- 回報時間：2026-09-24 16:05 (CST)（前次：2026-09-24 11:30）
+- 回報時間：2026-09-29 12:05 (CST)（前次：2026-09-24 16:05）
 - 專案：`~/work/ollama`（ollama-agent，Python MCP server，把本機 Ollama 模型變成 Claude Code 的工具）
 - 主機：本機（RTX 4080 16 GB，62 GB RAM，Ollama 0.34.3）
 - 回報人：專案維護者（由 Claude 依程式碼、測試結果與系統狀態整理）
@@ -117,3 +117,12 @@ F1、F2、F5、F6 已修（commit 見 git log），`formal/run.sh` 全綠；`uv 
 - F5：`overlap_lines < 0` 拋 `ValueError`。
 - 仍開放：F3、F4、F7、F8、F9（邊角設定與文件），見 `formal/SPEC.md` 末段。
 
+## 七、`delegate_task` 的 think 額度（2026-09-29）
+
+問題（9/24 情境測試 A1）：`think=true` 時預設 `max_tokens=4096` 可能全部花在思考，回傳「(model returned no text)」，而且思考內容沒寫進輸出檔，無從回收。當時改傳 16384 才成功，但 server 上限是 8192（初版就有），所以實際是 8192。專案維護者選「兩者都做」：
+
+- `max_tokens` 預設改成 0（自動）：不開 think 仍是 4096；開 think 給 8192，context 不夠就縮到放得下為止，但不低於 4096。明確傳的值照用（仍夾在 64–8192）。
+- 輸出檔在答案後面接模型的思考內容（`<!-- ollama-agent thinking (not part of the answer) -->` 標記），回給 Claude 的內容不含思考；meta 多記實際用的 `max_tokens`。
+- 只有思考、沒有答案時回傳加一條 warning，指向輸出檔；撞到長度上限時提示加大 `max_tokens` 或關 think。
+
+驗證：Z3 新增 D5（開 think 且用預設時 `num_predict ≥ 4096`，放得下就是 8192）、D6（新預設不會拒絕舊的固定 4096 會接受的輸入），D1、D2 改成涵蓋 think；`uv run pytest` 62 passed / 7 skipped（新增 5 個測試），`formal/run.sh` 全綠。真實 9B 重跑 A1：預設額度 8192，用了 4063 tokens、55.4 s，有答案且思考存檔；故意傳 `max_tokens=1024` 時回「(model returned no text)」加上述 warning，思考內容在輸出檔裡。
