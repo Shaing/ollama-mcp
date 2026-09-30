@@ -27,7 +27,7 @@ from hypothesis.stateful import RuleBasedStateMachine, invariant, rule
 from ollama_agent.backend import ChatChunk
 from ollama_agent.chunking import chunk_lines
 from ollama_agent.config import Settings, load_dotenv
-from ollama_agent.files import read_paths
+from ollama_agent.files import is_text, read_paths
 from ollama_agent.generate import Progress, estimate_tokens, run_generation
 from ollama_agent.index.store import IndexStore
 from ollama_agent.outputs import clip
@@ -138,6 +138,21 @@ def test_read_paths_budget_and_accounting(sizes, budget, data):
     assert taken == [p for p in paths if p in set(taken)]  # F3: input order is preserved
     assert not any(t.endswith("missing.txt") for t in taken)
 
+
+
+@hsettings(max_examples=60, deadline=None)
+@given(st.integers(0, 3), st.text(min_size=1, max_size=40), st.integers(4090, 4100))
+def test_is_text_accepts_utf8_cut_anywhere(pad, tail, prefix):
+    # F4: a UTF-8 file is text wherever the 4096-byte sample ends, even mid-character
+    body = "x" * pad + "會議紀錄🔃" * (prefix // 5) + tail.replace("\x00", "")
+    with tempfile.TemporaryDirectory() as d:
+        p = Path(d) / "notes.md"
+        p.write_text(body, encoding="utf-8")
+        assert is_text(p)
+        p.write_bytes(b"ok\x00ok")
+        assert not is_text(p)  # F5: NUL still means binary
+        p.write_bytes(b"ok \xff\xfe ok")
+        assert not is_text(p)  # F6: invalid UTF-8 still means binary
 
 # --- K: config.load_dotenv ---------------------------------------------------------------
 key_st = st.from_regex(r"\AOLLAMA_PBT_[A-Z0-9_]{1,8}\Z")

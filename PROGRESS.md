@@ -134,3 +134,13 @@ F1、F2、F5、F6 已修（commit 見 git log），`formal/run.sh` 全綠；`uv 
 修法：開 think 且撞到長度上限、JSON 又無效時，同一個問題不開 think 再問一次（沒有可修正的 JSON，所以不加修正提示），notes 說明原因、不再轉述「raise max_tokens」；沒開 think 的長度截斷維持不重試。思考內容比照 `delegate_task` 存在輸出檔。上限維持 4096，因為 diff 的裁切與 Z3 R1 都以它為準。
 
 驗證：SPEC 新增 V6；`uv run pytest` 64 passed / 7 skipped（新增 2 個測試，`ThinkingBackend` 移到 `conftest.py` 共用）。真實 9B：修正後同一個 diff 用預設值 17 s 就有結果（這次思考沒有超過額度）；把上限壓到 1024 強制走重試路徑，兩次都是「思考吃光 → 不開 think 重試 → 有效的 review」，各 16.5 s。
+
+## 八、超過 4 KB 的中文檔被當成二進位（2026-09-30）
+
+問題：`files.is_text()` 讀前 4096 bytes 後用嚴格 UTF-8 解碼。切點落在中文字或 emoji 中間時會 `UnicodeDecodeError`，檔案被當成二進位跳過（`delegate_task` 回 `skipped …: binary`；`summarize`、`index_codebase` 同一個函式）。任何超過 4 KB 的中文檔都有機率中，用一份 5.8K 字的中文會議紀錄測 9B 摘要時碰到：byte 4095 是某個字的第一個 byte。
+
+修法：改用 `codecs.getincrementaldecoder("utf-8")().decode(head, final=False)`，只拒絕真的不合法的位元組，不拒絕被切斷的最後一個字。NUL 仍判二進位。
+
+驗證：`tests/test_properties.py` 新增 F4–F6（切點在 4090–4100 bytes 之間任意位置的中文＋emoji 檔都算文字；NUL、`\xff\xfe` 仍算二進位）；還原修正時 F4 失敗、修正後通過；`uv run pytest` 65 passed / 7 skipped。
+
+生效：project scope 是 `uv run`，user scope 是 `register.sh` 的 `uv tool install --editable`（實際 import `~/work/ollama/src`），兩邊都是新開的 MCP server 就用到，不必重裝；已在跑的 session 要重開才會換。

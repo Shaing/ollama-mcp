@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import codecs
 import fnmatch
 import os
 from dataclasses import dataclass
@@ -39,7 +40,9 @@ def is_text(path: Path, sample: int = 4096) -> bool:
     if b"\x00" in head:
         return False
     try:
-        head.decode("utf-8")
+        # The sample can end inside a multi-byte character (CJK, emoji); only reject bytes
+        # that are invalid, not a sequence the cut left incomplete.
+        codecs.getincrementaldecoder("utf-8")().decode(head, final=False)
     except UnicodeDecodeError:
         return False
     return True
